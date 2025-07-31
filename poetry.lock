@@ -817,6 +817,17 @@ files = [
 ]
 
 [[package]]
+name = "parse"
+version = "1.18.0"
+description = "parse() is the opposite of format()"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "parse-1.18.0.tar.gz", hash = "sha256:91666032d6723dc5905248417ef0dc9e4c51df9526aaeef271eacad6491f06a4"},
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 description = "plugin and hook calling mechanisms for python"
@@ -1276,6 +1287,43 @@ files = [
 ]
 
 [[package]]
+name = "typedb-driver"
+version = "3.4.0"
+description = "TypeDB Driver for Python"
+optional = false
+python-versions = ">0"
+groups = ["main"]
+files = [
+    {file = "typedb_driver-3.4.0-py310-none-macosx_11_0_arm64.whl", hash = "sha256:a440425949ddfb92779a98fca5bb2fa368b37e011dbc412b51680d2f777c86c3"},
+    {file = "typedb_driver-3.4.0-py310-none-macosx_11_0_x86_64.whl", hash = "sha256:4ed1adcffbe000aec8e298f5e9ccb7e467f076849a71669c189c906e0f2bd414"},
+    {file = "typedb_driver-3.4.0-py310-none-manylinux_2_17_aarch64.whl", hash = "sha256:247f252a2a668b5ffb5e6a9da3352cfc33d33c26143c2caac3c5144ca4ac22d5"},
+    {file = "typedb_driver-3.4.0-py310-none-manylinux_2_17_x86_64.whl", hash = "sha256:1759547b2f8e12fd00648e12d6a01f0fe3ea18b31b7d3bce0460d5108365448b"},
+    {file = "typedb_driver-3.4.0-py310-none-win_amd64.whl", hash = "sha256:8e4a3f511f846ef5ac207831ae45a25bd6aba4acc96dbeadfe553c508b426832"},
+    {file = "typedb_driver-3.4.0-py311-none-macosx_11_0_arm64.whl", hash = "sha256:1ba39372270b2c3f3e0e4c326e57c04c589ef18f2eb8d49fa9169bf5dba2c829"},
+    {file = "typedb_driver-3.4.0-py311-none-macosx_11_0_x86_64.whl", hash = "sha256:a8a0bebb6ba0888c12dabb23538a743ce21d346b261cb5e8c2b1866cdc0b2bb4"},
+    {file = "typedb_driver-3.4.0-py311-none-manylinux_2_17_aarch64.whl", hash = "sha256:95f99ff162972779bc9b1f75831295e53f79005b05ce8ea633324b071b4da050"},
+    {file = "typedb_driver-3.4.0-py311-none-manylinux_2_17_x86_64.whl", hash = "sha256:3a50daf17a936c578dbe9121f713ca9aca51b8ce601173ddc186f6696ac33678"},
+    {file = "typedb_driver-3.4.0-py311-none-win_amd64.whl", hash = "sha256:e3979012892b925201909b9a0c9495f395cfd02ce578f9f6d85559ff77d9086d"},
+    {file = "typedb_driver-3.4.0-py312-none-macosx_11_0_arm64.whl", hash = "sha256:c8a7097e14749544e307b0e1836dd93d79c9ffd2b36d5e93d04f5047ccdbfd3d"},
+    {file = "typedb_driver-3.4.0-py312-none-macosx_11_0_x86_64.whl", hash = "sha256:d493a2ce7cebce5be8aa40aba73c1abe22ef4248752804c95dbf0a0b54b70e07"},
+    {file = "typedb_driver-3.4.0-py312-none-manylinux_2_17_aarch64.whl", hash = "sha256:29607aabfac51767f7b53620e789ae43f86ea71b5abe4a39cbef8cea73f5e79d"},
+    {file = "typedb_driver-3.4.0-py312-none-manylinux_2_17_x86_64.whl", hash = "sha256:4a318e2018e6b74a201275bdd692a621cb2cf070775ef70294145e3ec5d11d9d"},
+    {file = "typedb_driver-3.4.0-py312-none-win_amd64.whl", hash = "sha256:1bf46381285b7f1aa1cafe5bb941abfb6945fef93720dacd6f870ed3fa63abb2"},
+    {file = "typedb_driver-3.4.0-py313-none-macosx_11_0_arm64.whl", hash = "sha256:2473cb227d122ad0604443608b752800f2a24296a8d19c840d1db7649cb220ad"},
+    {file = "typedb_driver-3.4.0-py313-none-macosx_11_0_x86_64.whl", hash = "sha256:571133bbb66d785226c3d20d78585f000415c5eb52f26ca16139eb5c7ce3da18"},
+    {file = "typedb_driver-3.4.0-py313-none-manylinux_2_17_aarch64.whl", hash = "sha256:2b7ac3c875ce3deef3edbc4b158f11c5aad90ceb1470ce14e4a42200713d3b3c"},
+    {file = "typedb_driver-3.4.0-py313-none-manylinux_2_17_x86_64.whl", hash = "sha256:f0b97a39e148acf2c49a743c7c7f7ee615c38459df02bebb1283d541fe5aafd7"},
+    {file = "typedb_driver-3.4.0-py39-none-macosx_11_0_arm64.whl", hash = "sha256:a89a2e37c9359c7b94abfbbd88770605edc0f42a879ee8b5e7a3e520764a4f0e"},
+    {file = "typedb_driver-3.4.0-py39-none-macosx_11_0_x86_64.whl", hash = "sha256:aacaf69a07c601f8943d00f5a1d5b3fb478a5de6115de828a2e40bd379a4cc13"},
+    {file = "typedb_driver-3.4.0-py39-none-manylinux_2_17_aarch64.whl", hash = "sha256:4c9b46b683fd1c5573db6fa6b6bcd99e5c235c2928d3f27468479c08d0ed2f72"},
+    {file = "typedb_driver-3.4.0-py39-none-manylinux_2_17_x86_64.whl", hash = "sha256:a20b3c8c6ebe6faebe2decbf2ab735cba734be7c11cbd3eb9408646a4df9a66e"},
+    {file = "typedb_driver-3.4.0-py39-none-win_amd64.whl", hash = "sha256:523e9e4fc719c4de144fc5c569b38466ef20d368c16820e006d739e2a833b44c"},
+]
+
+[package.dependencies]
+parse = "1.18.0"
+
+[[package]]
 name = "typing-extensions"
 version = "4.14.0"
 description = "Backported and Experimental Type Hints for Python 3.9+"
@@ -1463,4 +1511,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "f9b41a637fdb4acd730ff194d78ee81e9e1ccf985cdf043833e6e149465c4d3e"
+content-hash = "b554c3fc6b142ed3f243ec4f7c174feec2cdc0b3d0d9635c6272469c17e6c304"
