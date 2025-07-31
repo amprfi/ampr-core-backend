@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from src.api.auth.router import router as auth_router
+from src.api.dependencies import get_authenticated_session
 
 app = FastAPI()
 
