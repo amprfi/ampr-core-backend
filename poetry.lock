@@ -489,6 +489,43 @@ test = ["certifi (>=2024)", "cryptography-vectors (==45.0.5)", "pretend (>=0.7)"
 test-randomorder = ["pytest-randomly"]
 
 [[package]]
+name = "dnspython"
+version = "2.7.0"
+description = "DNS toolkit"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "dnspython-2.7.0-py3-none-any.whl", hash = "sha256:b4c34b7d10b51bcc3a5071e7b8dee77939f1e878477eeecc965e9835f63c6c86"},
+    {file = "dnspython-2.7.0.tar.gz", hash = "sha256:ce9c432eda0dc91cf618a5cedf1a4e142651196bbcd2c80e89ed5a907e5cfaf1"},
+]
+
+[package.extras]
+dev = ["black (>=23.1.0)", "coverage (>=7.0)", "flake8 (>=7)", "hypercorn (>=0.16.0)", "mypy (>=1.8)", "pylint (>=3)", "pytest (>=7.4)", "pytest-cov (>=4.1.0)", "quart-trio (>=0.11.0)", "sphinx (>=7.2.0)", "sphinx-rtd-theme (>=2.0.0)", "twine (>=4.0.0)", "wheel (>=0.42.0)"]
+dnssec = ["cryptography (>=43)"]
+doh = ["h2 (>=4.1.0)", "httpcore (>=1.0.0)", "httpx (>=0.26.0)"]
+doq = ["aioquic (>=1.0.0)"]
+idna = ["idna (>=3.7)"]
+trio = ["trio (>=0.23)"]
+wmi = ["wmi (>=1.5.1)"]
+
+[[package]]
+name = "email-validator"
+version = "2.2.0"
+description = "A robust email address syntax and deliverability validation library."
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "email_validator-2.2.0-py3-none-any.whl", hash = "sha256:561977c2d73ce3611850a06fa56b414621e0c8faa9d66f2611407d87465da631"},
+    {file = "email_validator-2.2.0.tar.gz", hash = "sha256:cb690f344c617a714f22e66ae771445a1ceb46821152df8e165c5f9a364582b7"},
+]
+
+[package.dependencies]
+dnspython = ">=2.0.0"
+idna = ">=2.0.0"
+
+[[package]]
 name = "exceptiongroup"
 version = "1.3.0"
 description = "Backport of PEP 654 (exception groups)"
@@ -828,6 +865,18 @@ files = [
 ]
 
 [[package]]
+name = "phonenumbers"
+version = "9.0.10"
+description = "Python version of Google's common library for parsing, formatting, storing and validating international phone numbers."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "phonenumbers-9.0.10-py2.py3-none-any.whl", hash = "sha256:13b12d269be1f2b363c9bc2868656a7e2e8b50f1a1cef629c75005da6c374c6b"},
+    {file = "phonenumbers-9.0.10.tar.gz", hash = "sha256:c2d15a6a9d0534b14a7764f51246ada99563e263f65b80b0251d1a760ac4a1ba"},
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 description = "plugin and hook calling mechanisms for python"
@@ -952,6 +1001,18 @@ files = [
 ]
 
 [[package]]
+name = "pycountry"
+version = "24.6.1"
+description = "ISO country, subdivision, language, currency and script definitions and their translations"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "pycountry-24.6.1-py3-none-any.whl", hash = "sha256:f1a4fb391cd7214f8eefd39556d740adcc233c778a27f8942c8dca351d6ce06f"},
+    {file = "pycountry-24.6.1.tar.gz", hash = "sha256:b61b3faccea67f87d10c1f2b0fc0be714409e8fcdcc1315613174f6466c10221"},
+]
+
+[[package]]
 name = "pycparser"
 version = "2.22"
 description = "C parser in Python"
@@ -978,6 +1039,7 @@ files = [
 
 [package.dependencies]
 annotated-types = ">=0.6.0"
+email-validator = {version = ">=2.0.0", optional = true, markers = "extra == \"email\""}
 pydantic-core = "2.33.2"
 typing-extensions = ">=4.12.2"
 typing-inspection = ">=0.4.0"
@@ -1097,6 +1159,30 @@ files = [
 
 [package.dependencies]
 typing-extensions = ">=4.6.0,<4.7.0 || >4.7.0"
+
+[[package]]
+name = "pydantic-extra-types"
+version = "2.10.5"
+description = "Extra Pydantic types."
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "pydantic_extra_types-2.10.5-py3-none-any.whl", hash = "sha256:b60c4e23d573a69a4f1a16dd92888ecc0ef34fb0e655b4f305530377fa70e7a8"},
+    {file = "pydantic_extra_types-2.10.5.tar.gz", hash = "sha256:1dcfa2c0cf741a422f088e0dbb4690e7bfadaaf050da3d6f80d6c3cf58a2bad8"},
+]
+
+[package.dependencies]
+pydantic = ">=2.5.2"
+typing-extensions = "*"
+
+[package.extras]
+all = ["pendulum (>=3.0.0,<4.0.0)", "phonenumbers (>=8,<10)", "pycountry (>=23)", "pymongo (>=4.0.0,<5.0.0)", "python-ulid (>=1,<2) ; python_version < \"3.9\"", "python-ulid (>=1,<4) ; python_version >= \"3.9\"", "pytz (>=2024.1)", "semver (>=3.0.2)", "semver (>=3.0.2,<3.1.0)", "tzdata (>=2024.1)"]
+pendulum = ["pendulum (>=3.0.0,<4.0.0)"]
+phonenumbers = ["phonenumbers (>=8,<10)"]
+pycountry = ["pycountry (>=23)"]
+python-ulid = ["python-ulid (>=1,<2) ; python_version < \"3.9\"", "python-ulid (>=1,<4) ; python_version >= \"3.9\""]
+semver = ["semver (>=3.0.2)"]
 
 [[package]]
 name = "pygments"
@@ -1511,4 +1597,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "b554c3fc6b142ed3f243ec4f7c174feec2cdc0b3d0d9635c6272469c17e6c304"
+content-hash = "e3518940c152fc480b97b17e76615e4e8fee7c8ff1a85c194f4dd5b69f2e60f6"
