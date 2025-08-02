@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional
 from datetime import datetime
 from pydantic import EmailStr
@@ -5,13 +6,12 @@ from src.services.typedb_client import typedb_client
 from typedb.driver import TransactionType
 from src.services.auth_client import stytch_client
 from src.models.user import UserCreate, UserResponse, UserUpdate
-from contextlib import contextmanager
 
 class UserService:
     def __init__(self):
         self.typedb = typedb_client
 
-    def create_user(self, user_data: UserCreate) -> UserResponse:
+    async def create_user(self, user_data: UserCreate) -> UserResponse:
         """
         Create a new user in TypeDB
 
@@ -21,50 +21,46 @@ class UserService:
         Returns:
             UserResponse model with created user data
         """
-        with self.typedb.session() as session:
-            with self.typedb.transaction(session) as transaction:
+        def _create_user_sync():
+            with self.typedb.transaction() as transaction:
                 # Build the insert query
                 query = '''
                 insert
                 $user isa user,
-                    has first-name $first_name,
-                    has last-name $last_name,
-                    has email $email,
-                    has phone $phone,
-                    has country $country,
-                    has stytch-user-id $stytch_user_id,
-                    has created-at $created_at,
-                    has updated-at $updated_at;
+                    has first-name "''' + user_data.first_name + '''",
+                    has last-name "''' + user_data.last_name + '''",
+                    has email "''' + user_data.email + '''",
+                    has phone "''' + str(user_data.phone) + '''",
+                    has country "''' + user_data.country + '''",
+                    has stytch-user-id "''' + user_data.stytch_user_id + '''",
+                    has created-at ''' + datetime.utcnow().isoformat() + ''',
+                    has updated-at ''' + datetime.utcnow().isoformat() + ''';
                 '''
 
-                # Prepare the data
-                data = {
-                    'first_name': user_data.first_name,
-                    'last_name': user_data.last_name,
-                    'email': user_data.email,
-                    'phone': user_data.phone,
-                    'country': user_data.country,
-                    'stytch_user_id': user_data.stytch_user_id,
-                    'created_at': datetime.utcnow(),
-                    'updated_at': datetime.utcnow()
-                }
-
-                # Execute the query
-                response = transaction.query.insert(query, data)
+                # Execute the query using TypeDB 3.x API
+                print(f"Creating user with query: {query}")
+                result = transaction.query(query).resolve()
+                print(f"User creation result: {result}")
 
                 # Prepare response
-                return UserResponse(
+                response = UserResponse(
                     first_name=user_data.first_name,
                     last_name=user_data.last_name,
                     email=user_data.email,
                     phone=user_data.phone,
                     country=user_data.country,
                     stytch_user_id=user_data.stytch_user_id,
-                    created_at=data['created_at'],
-                    updated_at=data['updated_at']
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
                 )
+                print(f"Created user: {response}")
+                return response
 
-    def get_user_by_email(self, email: EmailStr) -> Optional[UserResponse]:
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _create_user_sync)
+
+    async def get_user_by_email(self, email: EmailStr) -> Optional[UserResponse]:
         """
         Get a user by email from TypeDB
 
@@ -74,44 +70,51 @@ class UserService:
         Returns:
             UserResponse model if found, None otherwise
         """
-        with self.typedb.session() as session:
-            with self.typedb.transaction(session, TransactionType.READ) as transaction:
+        def _get_user_sync():
+            with self.typedb.transaction(TransactionType.READ) as transaction:
                 query = '''
                 match
-                $user isa user, has email $email;
-                get
-                $user has first-name $first_name,
-                $user has last-name $last_name,
-                $user has email $email,
-                $user has phone $phone,
-                $user has country $country,
-                $user has stytch-user-id $stytch_user_id,
-                $user has created-at $created_at,
+                $user isa user, has email "''' + email + '''";
+                $user has first-name $first_name;
+                $user has last-name $last_name;
+                $user has email $email;
+                $user has phone $phone;
+                $user has country $country;
+                $user has stytch-user-id $stytch_user_id;
+                $user has created-at $created_at;
                 $user has updated-at $updated_at;
                 '''
-                data = {'email': email}
 
                 try:
-                    response = transaction.query.match(query, data)
-                    if response:
-                        # Extract data from response
-                        answer = response.get('answers')[0]
+                    print(f"Querying user with: {query}")
+                    result = transaction.query(query).resolve()
+                    answers = list(result)
+                    
+                    if answers:
+                        # Extract data from the first answer
+                        answer = answers[0]
+                        concepts = answer.concepts()
+                        
                         return UserResponse(
-                            first_name=answer.get('first_name'),
-                            last_name=answer.get('last_name'),
-                            email=answer.get('email'),
-                            phone=answer.get('phone'),
-                            country=answer.get('country'),
-                            stytch_user_id=answer.get('stytch_user_id'),
-                            created_at=answer.get('created_at'),
-                            updated_at=answer.get('updated_at')
+                            first_name=concepts['first_name'].as_attribute().get_value(),
+                            last_name=concepts['last_name'].as_attribute().get_value(),
+                            email=concepts['email'].as_attribute().get_value(),
+                            phone=concepts['phone'].as_attribute().get_value(),
+                            country=concepts['country'].as_attribute().get_value(),
+                            stytch_user_id=concepts['stytch_user_id'].as_attribute().get_value(),
+                            created_at=datetime.fromtimestamp(concepts['created_at'].as_attribute().get_value()),
+                            updated_at=datetime.fromtimestamp(concepts['updated_at'].as_attribute().get_value())
                         )
                     return None
                 except Exception as e:
                     print(f"Error getting user: {e}")
                     return None
 
-    def update_user(self, email: EmailStr, update_data: UserUpdate) -> Optional[UserResponse]:
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _get_user_sync)
+
+    async def update_user(self, email: EmailStr, update_data: UserUpdate) -> Optional[UserResponse]:
         """
         Update a user in TypeDB
 
@@ -122,49 +125,52 @@ class UserService:
         Returns:
             Updated UserResponse model if successful, None otherwise
         """
-        with self.typedb.session() as session:
-            with self.typedb.transaction(session) as transaction:
-                # Build the match part of the query
-                match_query = 'match $user isa user, has email $email;'
-                match_data = {'email': email}
-
-                # Build the insert part dynamically based on what fields are provided
-                updates = []
-                data = {'email': email, 'updated_at': datetime.utcnow()}
-
+        def _update_user_sync():
+            with self.typedb.transaction() as transaction:
+                # First, find the user
+                match_query = 'match $user isa user, has email "' + email + '";'
+                
+                # Build the delete and insert parts dynamically
+                delete_parts = []
+                insert_parts = []
+                
                 if update_data.first_name:
-                    updates.append('$user has first-name $first_name;')
-                    data['first_name'] = update_data.first_name
+                    delete_parts.append('$user has first-name $old_first_name;')
+                    insert_parts.append('$user has first-name "' + update_data.first_name + '";')
                 if update_data.last_name:
-                    updates.append('$user has last-name $last_name;')
-                    data['last_name'] = update_data.last_name
+                    delete_parts.append('$user has last-name $old_last_name;')
+                    insert_parts.append('$user has last-name "' + update_data.last_name + '";')
                 if update_data.phone:
-                    updates.append('$user has phone $phone;')
-                    data['phone'] = update_data.phone
+                    delete_parts.append('$user has phone $old_phone;')
+                    insert_parts.append('$user has phone "' + str(update_data.phone) + '";')
                 if update_data.country:
-                    updates.append('$user has country $country;')
-                    data['country'] = update_data.country
+                    delete_parts.append('$user has country $old_country;')
+                    insert_parts.append('$user has country "' + update_data.country + '";')
 
-                # Add updated-at
-                updates.append('$user has updated-at $updated_at;')
+                # Always update the updated-at timestamp
+                delete_parts.append('$user has updated-at $old_updated_at;')
+                insert_parts.append('$user has updated-at ' + str(int(datetime.utcnow().timestamp())) + ';')
 
-                if not updates:
-                    return None  # Nothing to update
+                if delete_parts and insert_parts:
+                    query = match_query + '\ndelete\n' + '\n'.join(delete_parts) + '\ninsert\n' + '\n'.join(insert_parts)
+                    
+                    try:
+                        print(f"Updating user with query: {query}")
+                        result = transaction.query(query).resolve()
+                        print(f"User update result: {result}")
+                        
+                        # Return updated user
+                        return self.get_user_by_email(email)
+                    except Exception as e:
+                        print(f"Error updating user: {e}")
+                        return None
+                return None
 
-                insert_query = 'insert ' + ' '.join(updates)
-                query = match_query + insert_query
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _update_user_sync)
 
-                try:
-                    # Execute the query
-                    transaction.query.insert(query, data)
-
-                    # Return the updated user
-                    return self.get_user_by_email(email)
-                except Exception as e:
-                    print(f"Error updating user: {e}")
-                    return None
-
-    def delete_user(self, email: EmailStr) -> bool:
+    async def delete_user(self, email: EmailStr) -> bool:
         """
         Delete a user from TypeDB
 
@@ -172,21 +178,26 @@ class UserService:
             email: User's email address
 
         Returns:
-            True if deletion was successful, False otherwise
+            True if successful, False otherwise
         """
-        with self.typedb.session() as session:
-            with self.typedb.transaction(session) as transaction:
+        def _delete_user_sync():
+            with self.typedb.transaction() as transaction:
                 query = '''
                 match
-                $user isa user, has email $email;
+                $user isa user, has email "''' + email + '''";
                 delete
                 $user isa user;
                 '''
-                data = {'email': email}
 
                 try:
-                    transaction.query.delete(query, data)
+                    print(f"Deleting user with query: {query}")
+                    result = transaction.query(query).resolve()
+                    print(f"User deletion result: {result}")
                     return True
                 except Exception as e:
                     print(f"Error deleting user: {e}")
                     return False
+
+        # Run the synchronous operation in a thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _delete_user_sync)

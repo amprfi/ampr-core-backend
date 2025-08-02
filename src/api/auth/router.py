@@ -1,5 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
+from pydantic_extra_types.country import CountryAlpha3
+from pydantic_extra_types.phone_numbers import PhoneNumber
+from typing import Optional
 from datetime import datetime
 from src.services.auth_client import stytch_client
 from src.services.user_service import UserService
@@ -11,10 +14,14 @@ router = APIRouter()
 user_service = UserService()
 
 class LoginPayload(BaseModel):
-    email: str
+    email: EmailStr
+    first_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    phone: Optional[PhoneNumber] = None
+    country: Optional[CountryAlpha3] = None
 
 @router.post("/login")
-def login(payload: LoginPayload):
+async def login(payload: LoginPayload):
     try:
         # Send magic link via Stytch
         stytch_client.magic_links.email.login_or_create(
@@ -22,18 +29,18 @@ def login(payload: LoginPayload):
         )
 
         # Check if user exists in TypeDB, create if not
-        user = user_service.get_user_by_email(payload.email)
+        user = await user_service.get_user_by_email(payload.email)
         if not user:
-            # Create a basic user record in TypeDB
+            # Create a basic user record in TypeDB with provided data or defaults
             user_data = UserCreate(
-                first_name="New",
-                last_name="User",
+                first_name=payload.first_name or "New",
+                last_name=payload.last_name or "User",
                 email=payload.email,
-                phone="",
-                country="",
+                phone=payload.phone or "+18472840023",
+                country=payload.country or "CAN",
                 stytch_user_id="placeholder"  # This should be set properly when we have the Stytch user ID
             )
-            user_service.create_user(user_data)
+            await user_service.create_user(user_data)
 
         return {"message": "Magic link sent to your email."}
     except Exception as e:
@@ -43,7 +50,7 @@ class AuthenticatePayload(BaseModel):
     token: str
 
 @router.post("/authenticate")
-def authenticate(payload: AuthenticatePayload):
+async def authenticate(payload: AuthenticatePayload):
     try:
         # Authenticate with Stytch
         resp = stytch_client.magic_links.authenticate(
@@ -55,18 +62,18 @@ def authenticate(payload: AuthenticatePayload):
         stytch_user = stytch_client.users.get(user_id=resp.user_id)
 
         # Ensure user exists in TypeDB
-        user = user_service.get_user_by_email(stytch_user.email)
+        user = await user_service.get_user_by_email(stytch_user.email)
         if not user:
             # Create user if doesn't exist
             user_data = UserCreate(
                 first_name=stytch_user.name.first_name or "New",
                 last_name=stytch_user.name.last_name or "User",
                 email=stytch_user.email,
-                phone=stytch_user.phone_number or "",
-                country=stytch_user.country or "",
+                phone=stytch_user.phone_number or "+18472840023",
+                country=stytch_user.country or "CAN",
                 stytch_user_id=stytch_user.user_id
             )
-            user = user_service.create_user(user_data)
+            user = await user_service.create_user(user_data)
 
         return {
             "user_id": resp.user_id,
