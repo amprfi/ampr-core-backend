@@ -680,6 +680,51 @@ files = [
 ]
 
 [[package]]
+name = "gel"
+version = "3.1.0"
+description = "Official Gel Python Driver"
+optional = false
+python-versions = ">=3.9.0"
+groups = ["main"]
+files = [
+    {file = "gel-3.1.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:09230f91dbbdc2204932b44fdfcf175285222ab6e3766b3bd75b057ce6e4d975"},
+    {file = "gel-3.1.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:83a70217a1afdd83d89a731647293480eec6ac9682358b14b1f76342dd7f43e5"},
+    {file = "gel-3.1.0-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:cf45d7b6cf445fef160b930d4b8f89a33a8b2cb0ae1bec70a9acb97e30e42de8"},
+    {file = "gel-3.1.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:56e24f1705cc8a5a3df522c06f38859f3a2f870cfb1378f6316c8c9351e8daca"},
+    {file = "gel-3.1.0-cp310-cp310-win_amd64.whl", hash = "sha256:e526e883888f83aa73e6c79cc8ed1c10d866494c7a130b134911193d1f86c8a1"},
+    {file = "gel-3.1.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:2204985818d2c03f34c3ee35a211ebdb76b1452a0e4bdba6548664b2761c4d91"},
+    {file = "gel-3.1.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:d3782b2d18c75d9a14c7102ca4ea3a31a053128a922f6e0d1ee855cc4262789e"},
+    {file = "gel-3.1.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:43a4dd3ca142171f65b66134c2c0a01bef4742daabd7664b699b43e6c7921a5a"},
+    {file = "gel-3.1.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ad9ce2db8f55d78762e86610ed1d05150e06fb80570a78a4b10de166d9a56545"},
+    {file = "gel-3.1.0-cp311-cp311-win_amd64.whl", hash = "sha256:6c1a83c457c1e3519cb905a2769b97254548b8126098cc948c422560c7c6909c"},
+    {file = "gel-3.1.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:42dedd9f691e2e6c82539dc04ff05d6a6dc6e0c13b07192442e142a87f1c37b1"},
+    {file = "gel-3.1.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:b2d7497fe30ae9794f6f24df59071bf9da2d7accd67d4216ebe126c7ef3c173d"},
+    {file = "gel-3.1.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8421976750c4e8bac052797e8ffee2f082b1268bfc2f1d5a265eedfcf8c4f116"},
+    {file = "gel-3.1.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b059b4d2aac27a1ee95c3bd18add1090a899e7bfd4668f1c99aa3d1f57b7714a"},
+    {file = "gel-3.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:3927e15c98867c71bdfd13d887efc0268c30e657d46d1a7bf916787b445f3d76"},
+    {file = "gel-3.1.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:f5e41f4ddc86e054256e81302905e671647577c1aed7249e1781aee1e0cb2f7c"},
+    {file = "gel-3.1.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:cd20c45beec358197293ad5c1fcf7fd383153e0d8d7038322085cf27436dc975"},
+    {file = "gel-3.1.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8a526e11ba696d1cf6c876c08afe6ab5f762a227faaa3b78523ebc2511567609"},
+    {file = "gel-3.1.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c06f11fcde231d6264dbe0b19d7b2942767a196e9c6f2cabf22fbb04094134af"},
+    {file = "gel-3.1.0-cp313-cp313-win_amd64.whl", hash = "sha256:48235a5082f03d7eccbcaa4255260c8a3cdb2cfd123f121dd6b0d3ebc51421ac"},
+    {file = "gel-3.1.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:8a8926dc06884f007900482b29c1cef7342c27318f44f7fa429e861f914701c0"},
+    {file = "gel-3.1.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:6a6fa927f280639e014445f960f0237adb5c176a70123e7accfa82ff5126653a"},
+    {file = "gel-3.1.0-cp39-cp39-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f52de74b8425f041a8cbd5489f6bae2b1b3e6b2725575f4251f2ad9d201ff1a8"},
+    {file = "gel-3.1.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f493681cb6d1ad5ad5ece1f27d8fb4f496ff7cb33138d49e875141077919cee5"},
+    {file = "gel-3.1.0-cp39-cp39-win_amd64.whl", hash = "sha256:50e8c52dc8fbbf2ab26bbe7b68f2a4cdd391e0a1b8f20c590576828bb5dd4851"},
+    {file = "gel-3.1.0.tar.gz", hash = "sha256:3bb0b21167e00c976675a7d5dd73c21002e659651bf9de7fa46cd418bfa3eb85"},
+]
+
+[package.dependencies]
+certifi = {version = ">=2021.5.30", markers = "platform_system == \"Windows\""}
+
+[package.extras]
+ai = ["httpx (>=0.27.0,<0.28.0)", "httpx-sse (>=0.4.0,<0.5.0)"]
+doc = ["sphinx (>=4.2.0,<4.3.0)", "sphinx_rtd_theme (>=1.0.0,<1.1.0)", "sphinxcontrib-asyncio (>=0.3.0,<0.4.0)"]
+sqltest = ["Django (>=5.1.3,<5.2.0)", "SQLAlchemy (>=2.0.0)", "psycopg2-binary (>=2.9.10)", "sqlmodel (>=0.0.22)"]
+test = ["pycodestyle (>=2.11.1,<2.12.0)", "pyflakes (>=3.2.0,<3.3.0)", "pytest (>=3.6.0)", "uvloop (>=0.15.1) ; platform_system != \"Windows\""]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 description = "A pure-Python, bring-your-own-I/O implementation of HTTP/1.1"
@@ -1597,4 +1642,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10"
-content-hash = "e3518940c152fc480b97b17e76615e4e8fee7c8ff1a85c194f4dd5b69f2e60f6"
+content-hash = "23cb70e8f478b0c9a64bf5516a61978e39aa77f4b6877ec8ab8cda0422a431f2"
