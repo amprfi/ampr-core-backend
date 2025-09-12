@@ -1,24 +1,23 @@
 import asyncio
-import re
+import traceback
 from typing import Optional
 from datetime import datetime
 from pydantic import EmailStr
-from src.services.typedb_client import typedb_client
-from typedb.driver import TransactionType
+from src.services.gel_client import get_gel_client, get_gel_transaction
 from src.models.user import UserCreate, UserResponse, UserUpdate
+import logging
 
-def escape_typedb_string(value: str) -> str:
-    """Escape special characters for TypeDB string literals"""
-    # Escape backslashes and double quotes
-    return value.replace('\\', '\\\\').replace('"', '\\"')
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class UserService:
     def __init__(self):
-        self.typedb = typedb_client
+        pass  # Gel client is managed globally
 
     async def create_user(self, user_data: UserCreate) -> UserResponse:
         """
-        Create a new user in TypeDB
+        Create a new user in Gel
 
         Args:
             user_data: UserCreate model with user data
@@ -29,75 +28,68 @@ class UserService:
         Raises:
             ValueError: If user with email already exists
         """
-        def _create_user_sync():
-            with self.typedb.transaction() as transaction:
-                # First check if user already exists
-                safe_email = escape_typedb_string(user_data.email)
-                check_query = f'''
-                match
-                $user isa user, has email "{safe_email}";
-                '''
+        logger.debug(f"Creating user with email: {user_data.email}")
+        logger.debug(f"User data: {user_data.dict()}")
 
-                try:
-                    # Check for existing user
-                    result = transaction.query(check_query).resolve()
-                    if list(result):
-                        raise ValueError(f"User with email {user_data.email} already exists")
-
-                    # Build the insert query with proper escaping
-                    current_time = datetime.utcnow().isoformat()
-                    query = f'''
-                    insert
-                    $user isa user,
-                        has first-name "{escape_typedb_string(user_data.first_name)}",
-                        has last-name "{escape_typedb_string(user_data.last_name)}",
-                        has email "{safe_email}",
-                        has phone "{escape_typedb_string(str(user_data.phone))}",
-                        has country "{escape_typedb_string(user_data.country)}",
-                        has stytch-user-id "{escape_typedb_string(user_data.stytch_user_id)}",
-                        has created-at {current_time},
-                        has updated-at {current_time};
-                    '''
-
-                    # Execute the query using TypeDB 3.x API
-                    print(f"Creating user with query: {query}")
-                    transaction.query(query).resolve()
-
-                    # Prepare response
-                    response = UserResponse(
-                        first_name=user_data.first_name,
-                        last_name=user_data.last_name,
-                        email=user_data.email,
-                        phone=user_data.phone,
-                        country=user_data.country,
-                        stytch_user_id=user_data.stytch_user_id,
-                        created_at=datetime.fromisoformat(current_time),
-                        updated_at=datetime.fromisoformat(current_time)
-                    )
-                    print(f"Created user: {response}")
-                    return response
-
-                except ValueError:
-                    # Re-raise duplicate user error
-                    raise
-                except Exception as e:
-                    print(f"Error creating user: {e}")
-                    raise RuntimeError(f"Failed to create user: {e}")
-
-        # Run the synchronous operation in a thread pool
         try:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, _create_user_sync)
-        except ValueError as e:
-            # Re-raise duplicate user error
-            raise
+            client = await get_gel_client()
+            logger.debug("Got Gel client")
+            
+            # First check if user already exists
+            check_query = """
+                select User
+                filter .email = <str>$email
+                limit 1
+            """
+
+            logger.debug("Checking if user already exists")
+            existing_user = await client.query_single(check_query, email=user_data.email)
+            if existing_user:
+                logger.warning(f"User with email {user_data.email} already exists")
+                raise ValueError(f"User with email {user_data.email} already exists")
+
+            # Create the user - Note: identity should be set when integrating with Gel Auth
+            current_time = datetime.utcnow().isoformat()
+            insert_query = """
+                insert User {
+                    first_name := <str>$first_name,
+                    last_name := <str>$last_name,
+                    email := <str>$email,
+                    phone := <str>$phone,
+                    country := <str>$country,
+                    created_at := <datetime>$created_at,
+                    updated_at := <datetime>$updated_at
+                }
+            """
+
+            logger.debug("Executing insert query")
+            try:
+                await client.execute(insert_query,
+                            first_name=user_data.first_name,
+                            last_name=user_data.last_name,
+                            email=user_data.email,
+                            phone=str(user_data.phone),
+                            country=user_data.country,
+                            created_at=current_time,
+                            updated_at=current_time)
+            except Exception as query_error:
+                logger.error(f"Error executing insert query: {str(query_error)}")
+                logger.error(f"Error type: {type(query_error)}")
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+                raise
+
+            logger.debug("User created successfully")
+            # Return the created user
+            return await self.get_user_by_email(user_data.email)
         except Exception as e:
-            print(f"Error in create_user: {e}")
+            logger.error(f"Error creating user: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
             raise
 
     async def get_user_by_email(self, email: EmailStr) -> Optional[UserResponse]:
         """
-        Get a user by email from TypeDB
+        Get a user by email from Gel
 
         Args:
             email: User's email address
@@ -105,61 +97,48 @@ class UserService:
         Returns:
             UserResponse model if found, None otherwise
         """
-        def _get_user_sync():
-            with self.typedb.transaction(TransactionType.READ) as transaction:
-                safe_email = escape_typedb_string(email)
-                query = f'''
-                match
-                $user isa user, has email "{safe_email}";
-                $user has first-name $first_name;
-                $user has last-name $last_name;
-                $user has email $email_val;
-                $user has phone $phone;
-                $user has country $country;
-                $user has stytch-user-id $stytch_user_id;
-                $user has created-at $created_at;
-                $user has updated-at $updated_at;
-                '''
+        logger.debug(f"Getting user by email: {email}")
+        try:
+            client = await get_gel_client()
+            query = """
+                select User {
+                    first_name,
+                    last_name,
+                    email,
+                    phone,
+                    country,
+                    created_at,
+                    updated_at
+                }
+                filter .email = <str>$email
+                limit 1
+            """
 
-                try:
-                    print(f"Querying user with email: {email}")
-                    result = transaction.query(query).resolve()
-                    answers = list(result)
-
-                    if answers:
-                        # Extract data from the first answer
-                        answer = answers[0]
-                        first_name = answer.get("first_name").as_attribute().get_value()
-                        last_name = answer.get("last_name").as_attribute().get_value()
-                        email_val = answer.get("email_val").as_attribute().get_value()
-                        phone = answer.get("phone").as_attribute().get_value()
-                        country = answer.get("country").as_attribute().get_value()
-                        stytch_user_id = answer.get("stytch_user_id").as_attribute().get_value()
-                        created_at = datetime.fromisoformat(answer.get("created_at").as_attribute().get_value())
-                        updated_at = datetime.fromisoformat(answer.get("updated_at").as_attribute().get_value())
-
-                        return UserResponse(
-                            first_name=first_name,
-                            last_name=last_name,
-                            email=email_val,
-                            phone=phone,
-                            country=country,
-                            stytch_user_id=stytch_user_id,
-                            created_at=created_at,
-                            updated_at=updated_at
-                        )
-                    return None
-                except Exception as e:
-                    print(f"Error getting user: {e}")
-                    return None
-
-        # Run the synchronous operation in a thread pool
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _get_user_sync)
+            logger.debug("Executing query to get user by email")
+            user = await client.query_single(query, email=email)
+            if user:
+                logger.debug(f"User found: {user}")
+                return UserResponse(
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    email=user.email,
+                    phone=user.phone,
+                    country=user.country,
+                    stytch_user_id="",  # Temporary placeholder - will integrate with auth later
+                    created_at=user.created_at,
+                    updated_at=user.updated_at
+                )
+            logger.debug("No user found with that email")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting user by email: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            raise
 
     async def update_user(self, email: EmailStr, update_data: UserUpdate) -> Optional[UserResponse]:
         """
-        Update a user in TypeDB
+        Update a user in Gel
 
         Args:
             email: User's email address
@@ -168,64 +147,67 @@ class UserService:
         Returns:
             Updated UserResponse model if successful, None otherwise
         """
-        def _update_user_sync():
-            with self.typedb.transaction() as transaction:
-                safe_email = escape_typedb_string(email)
-                # Build the match query with parameter
-                match_query = f'match $user isa user, has email "{safe_email}";'
+        logger.debug(f"Updating user with email: {email}")
+        logger.debug(f"Update data: {update_data.dict()}")
 
-                # Build the delete and insert parts dynamically
-                delete_parts = []
-                insert_parts = []
+        try:
+            client = await get_gel_client()
+            # Build update query dynamically
+            update_parts = []
+            params = {"email": email}
 
-                # Collect update parameters
-                if update_data.first_name:
-                    safe_value = escape_typedb_string(update_data.first_name)
-                    delete_parts.append('$user has first-name $old_first_name;')
-                    insert_parts.append(f'$user has first-name "{safe_value}";')
+            if update_data.first_name:
+                update_parts.append("first_name := <str>$first_name")
+                params["first_name"] = update_data.first_name
 
-                if update_data.last_name:
-                    safe_value = escape_typedb_string(update_data.last_name)
-                    delete_parts.append('$user has last-name $old_last_name;')
-                    insert_parts.append(f'$user has last-name "{safe_value}";')
+            if update_data.last_name:
+                update_parts.append("last_name := <str>$last_name")
+                params["last_name"] = update_data.last_name
 
-                if update_data.phone:
-                    safe_value = escape_typedb_string(str(update_data.phone))
-                    delete_parts.append('$user has phone $old_phone;')
-                    insert_parts.append(f'$user has phone "{safe_value}";')
+            if update_data.phone:
+                update_parts.append("phone := <str>$phone")
+                params["phone"] = str(update_data.phone)
 
-                if update_data.country:
-                    safe_value = escape_typedb_string(update_data.country)
-                    delete_parts.append('$user has country $old_country;')
-                    insert_parts.append(f'$user has country "{safe_value}";')
+            if update_data.country:
+                update_parts.append("country := <str>$country")
+                params["country"] = update_data.country
 
-                # Always update the updated-at timestamp
-                updated_at = datetime.utcnow().isoformat()
-                delete_parts.append('$user has updated-at $old_updated_at;')
-                insert_parts.append(f'$user has updated-at {updated_at};')
+            # Note: stytch_user_id not in current schema - will add auth integration later
 
-                if delete_parts and insert_parts:
-                    query = match_query + '\ndelete\n' + '\n'.join(delete_parts) + '\ninsert\n' + '\n'.join(insert_parts)
+            # Always update the updated_at timestamp
+            updated_at = datetime.utcnow().isoformat()
+            update_parts.append("updated_at := <datetime>$updated_at")
+            params["updated_at"] = updated_at
 
-                    try:
-                        print(f"Updating user with query: {query}")
-                        result = transaction.query(query).resolve()
-                        print(f"User update result: {result}")
+            if update_parts:
+                update_query = f"""
+                    update User
+                    filter .email = <str>$email
+                    set {', '.join(update_parts)}
+                """
 
-                        # Return updated user - get fresh data from database
-                        return self.get_user_by_email(email)
-                    except Exception as e:
-                        print(f"Error updating user: {e}")
-                        return None
-                return None
+                logger.debug(f"Executing update query: {update_query}")
+                try:
+                    await client.execute(update_query, **params)
+                    logger.debug("Update query executed successfully")
+                except Exception as query_error:
+                    logger.error(f"Error executing update query: {str(query_error)}")
+                    logger.error(f"Error type: {type(query_error)}")
+                    logger.error(f"Stack trace: {traceback.format_exc()}")
+                    raise
 
-        # Run the synchronous operation in a thread pool
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _update_user_sync)
+            # Return updated user
+            return await self.get_user_by_email(email)
+        except Exception as e:
+            logger.error(f"Error updating user: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            raise
+        return None
 
     async def delete_user(self, email: EmailStr) -> bool:
         """
-        Delete a user from TypeDB
+        Delete a user from Gel
 
         Args:
             email: User's email address
@@ -233,25 +215,26 @@ class UserService:
         Returns:
             True if successful, False otherwise
         """
-        def _delete_user_sync():
-            with self.typedb.transaction() as transaction:
-                safe_email = escape_typedb_string(email)
-                query = f'''
-                match
-                $user isa user, has email "{safe_email}";
-                delete
-                $user isa user;
-                '''
+        logger.debug(f"Deleting user with email: {email}")
+        try:
+            client = await get_gel_client()
+            query = """
+                delete User
+                filter .email = <str>$email
+            """
 
-                try:
-                    print(f"Deleting user with email: {email}")
-                    result = transaction.query(query).resolve()
-                    print(f"User deletion result: {result}")
-                    return True
-                except Exception as e:
-                    print(f"Error deleting user: {e}")
-                    return False
-
-        # Run the synchronous operation in a thread pool
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _delete_user_sync)
+            logger.debug("Executing delete query")
+            try:
+                result = await client.execute(query, email=email)
+                logger.debug("Delete query executed successfully")
+                return True
+            except Exception as query_error:
+                logger.error(f"Error executing delete query: {str(query_error)}")
+                logger.error(f"Error type: {type(query_error)}")
+                logger.error(f"Stack trace: {traceback.format_exc()}")
+                raise
+        except Exception as e:
+            logger.error(f"Error deleting user: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Stack trace: {traceback.format_exc()}")
+            raise

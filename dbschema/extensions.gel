@@ -7,7 +7,7 @@
 #
 # See: https://docs.geldata.com/reference/auth
 #
-#using extension auth;
+using extension auth;
 
 
 # Gel AI is a set of tools designed to enable you to ship

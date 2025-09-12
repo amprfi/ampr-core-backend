@@ -1,4 +1,3 @@
-
 ## ==== [ Instance configuration ] ====
 
 ## This file is applied with `gel init`.
@@ -14,8 +13,8 @@
 # session_idle_transaction_timeout     = "30 seconds"
 # query_execution_timeout              = "1 minute"
 
-## which SMTP provider to use by default (see the configuration example below)
-# current_email_provider_name       = "mailtrap_sandbox"
+## which SMTP provider to use by default
+current_email_provider_name       = "resend_smtp"
 
 ## DDL & policy flags
 # allow_dml_in_functions             = false
@@ -31,96 +30,44 @@
 # [instance.config]
 # http_max_connections                = 100
 
-## Email providers (SMTP)
-# [[branch.config."cfg::SMTPProviderConfig"]]
-# name                  = "mailtrap_sandbox"
-# sender                = "hello@example.com"
-# host                  = "sandbox.smtp.mailtrap.io"
-# port                  = 2525
-# username              = "YOUR_USERNAME"
-# password              = "YOUR_PASSWORD"
-# timeout_per_email     = "5 minutes"
-# timeout_per_attempt   = "1 minute"
-# validate_certs        = false
-
-
 ## ---- [ Auth ] ----
 
-## To use these options, you must first enable `auth` extension in your schema.
-## 1. Add `using extension auth;` to default.gel,
-## 2. Run `gel migration create`
-## 3. Run `gel migration apply`
+## Auth extension is already enabled in the schema
 
 ## general auth settings
-# [branch.config."ext::auth::AuthConfig"]
-# app_name                           = "My Project"
-# logo_url                           = "https://localhost:8000/static/logo.png"
-# dark_logo_url                      = "https://localhost:8000/static/darklogo.png"
-# brand_color                        = "#0000FF"
-# auth_signing_key                   = "__GENERATED_UUID__"
-# token_time_to_live                 = "1 hour"
-# allowed_redirect_urls              = ["http://localhost:8000", "http://testserver"]
-
-## Email & Password Auth Provider
-# [[branch.config."ext::auth::EmailPasswordProviderConfig"]]
-# require_verification              = false
-
-## Apple OAuth Provider
-# [[branch.config."ext::auth::AppleOAuthProvider"]]
-# client_id                         = "YOUR_APPLE_CLIENT_ID"
-# secret                            = "YOUR_APPLE_SECRET"
-# additional_scope                  = "email name"
-
-## Azure OAuth Provider
-# [[branch.config."ext::auth::AzureOAuthProvider"]]
-# client_id                         = "YOUR_AZURE_CLIENT_ID"
-# secret                            = "YOUR_AZURE_SECRET"
-# additional_scope                  = "openid profile email"
-
-## Discord OAuth Provider
-# [[branch.config."ext::auth::DiscordOAuthProvider"]]
-# client_id                         = "YOUR_DISCORD_CLIENT_ID"
-# secret                            = "YOUR_DISCORD_SECRET"
-# additional_scope                  = "identify email"
-
-## Slack OAuth Provider
-# [[branch.config."ext::auth::SlackOAuthProvider"]]
-# client_id                         = "YOUR_SLACK_CLIENT_ID"
-# secret                            = "YOUR_SLACK_SECRET"
-# additional_scope                  = "identity.basic identity.email"
-
-## GitHub OAuth Provider
-# [[branch.config."ext::auth::GitHubOAuthProvider"]]
-# client_id                         = "YOUR_GITHUB_CLIENT_ID"
-# secret                            = "YOUR_GITHUB_SECRET"
-# additional_scope                  = "read:user user:email"
-
-## Google OAuth Provider
-# [[branch.config."ext::auth::GoogleOAuthProvider"]]
-# client_id                         = "YOUR_GOOGLE_CLIENT_ID"
-# secret                            = "YOUR_GOOGLE_SECRET"
-# additional_scope                  = "openid email profile"
-
-## WebAuthn Provider
-# [[branch.config."ext::auth::WebAuthnProviderConfig"]]
-# relying_party_origin              = "https://example.com"
-# require_verification              = true
+[branch.config."ext::auth::AuthConfig"]
+app_name                           = "AmprFi"
+logo_url                           = "https://localhost:8000/static/logo.png"
+brand_color                        = "#4F46E5"
+token_time_to_live                 = "1 hour"
+allowed_redirect_urls              = ["http://localhost:8000", "http://localhost:8000/auth/callback"]
 
 ## Magic Link Provider
-# [[branch.config."ext::auth::MagicLinkProviderConfig"]]
-# token_time_to_live                = "15 minutes"
+[[branch.config."ext::auth::MagicLinkProviderConfig"]]
+token_time_to_live                = "15 minutes"
 
 ## UI customization
-# [branch.config."ext::auth::UIConfig"]
-# redirect_to                        = "http://localhost:8000/auth/callback"
-# redirect_to_on_signup              = "http://localhost:8000/auth/callback?isSignUp=true"
+[branch.config."ext::auth::UIConfig"]
+redirect_to                        = "http://localhost:8000/auth/callback"
+redirect_to_on_signup              = "http://localhost:8000/auth/callback?isSignUp=true"
+
+## Resend SMTP Configuration for Gel
+[[branch.config."cfg::SMTPProviderConfig"]]
+name                  = "resend_smtp"
+sender                = "noreply@ampr.fi"
+host                  = "smtp.resend.com"
+port                  = 587
+username              = "resend"  # Resend SMTP username
+password              = ""
+timeout_per_email     = "5 minutes"
+timeout_per_attempt   = "1 minute"
+validate_certs        = true
 
 ## Webhooks (ext::auth::WebhookConfig)
 # [[branch.config."ext::auth::WebhookConfig"]]
 # url                              = "https://example.com/webhook"
 # events                           = ["IdentityCreated", "EmailVerified"]
 # signing_secret_key               = "YOUR_WEBHOOK_SECRET"
-
 
 ## ---- [ AI ] ----
 

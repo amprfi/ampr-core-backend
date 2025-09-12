@@ -11,7 +11,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     phone: PhoneNumber
     country: CountryAlpha3
-    stytch_user_id: str = Field(..., min_length=1, max_length=100)
+    gel_user_id: Optional[str] = Field(None, min_length=1, max_length=100)
 
 class UserResponse(BaseModel):
     """Model for user API responses"""
@@ -31,5 +31,5 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[PhoneNumber] = None
     country: Optional[CountryAlpha3] = None
-    stytch_user_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    gel_user_id: Optional[str] = Field(None, min_length=1, max_length=100)
 

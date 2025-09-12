@@ -2,11 +2,9 @@ using extension auth;
 
 module default {
 
-  # User type that integrates with Gel Auth
   type User {
     required first_name: str;
     required last_name: str;
-    required country: str;
     required email: str {
       constraint exclusive;
       constraint max_len_value(255);
@@ -17,10 +15,10 @@ module default {
       constraint max_len_value(20);
       constraint regexp(r'^\+?[\d\s\-\(\)]{10,}$');
     };
-    required created_at: datetime;
-    required updated_at: datetime;
-    required identity: ext::auth::Identity {
-      constraint exclusive;
+    required country: str;
+    required created_at: datetime {
+      readonly := true;
+      default := datetime_current();
     };
   }
 }
