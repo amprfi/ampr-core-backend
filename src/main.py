@@ -16,7 +16,7 @@ fast_api.add_middleware(
     allow_headers=["*"],
 )
 
-fast_api.include_router(users.router)
+fast_api.include_router(users.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():
