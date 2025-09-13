@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import users
+from .api import auth
 
 fast_api = FastAPI()
 
@@ -17,6 +18,8 @@ fast_api.add_middleware(
 )
 
 fast_api.include_router(users.router, prefix="/api")
+
+fast_api.include_router(auth.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():
