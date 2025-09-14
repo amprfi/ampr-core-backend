@@ -20,5 +20,8 @@ module default {
       readonly := true;
       default := datetime_current();
     };
+    identity: ext::auth::Identity {
+      constraint exclusive;
+    };
   }
 }
