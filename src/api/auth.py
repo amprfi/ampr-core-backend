@@ -6,18 +6,30 @@ import httpx
 import gel
 from fastapi import APIRouter, Response, Request, HTTPException, Cookie
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
+from pydantic_extra_types.country import CountryAlpha3
+from pydantic_extra_types.phone_numbers import PhoneNumber
 
 from dotenv import load_dotenv
 load_dotenv()
+
+from ..queries import create_user_async_edgeql as create_user_qry
+from ..queries import get_user_by_email_async_edgeql as get_user_by_email_qry
 
 router = APIRouter()
 client = gel.create_async_client()
 
 GEL_AUTH_BASE_URL = os.getenv("GEL_AUTH_BASE_URL")
-SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:5001")
+SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:8000/api")
 
 class MagicLinkRequest(BaseModel):
+    email: EmailStr
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
+    phone: PhoneNumber
+    country: CountryAlpha3
+
+class MagicLinkLoginRequest(BaseModel):
     email: EmailStr
 
 def generate_pkce():
@@ -26,16 +38,24 @@ def generate_pkce():
     return verifier, base64.urlsafe_b64encode(challenge).decode('utf-8').rstrip('=')
 
 @router.post("/auth/magic-link/send")
-async def request_magic_link(request_data: MagicLinkRequest, response: Response):
+async def request_magic_link(request_data: MagicLinkLoginRequest, response: Response):
     """Request a magic link for EXISTING users (sign-in)."""
+    # First check if user exists in our database
+    user = await get_user_by_email_qry.get_user_by_email(client, email=request_data.email)
+
+    if user is None:
+        # User doesn't exist in our database
+        raise HTTPException(
+            status_code=404,
+            detail="User not found. Please sign up first."
+        )
+
     verifier, challenge = generate_pkce()
-    response.set_cookie(
-        key="gel-pkce-verifier", value=verifier,
-        httponly=True, secure=True, samesite='strict', max_age=900
-    )
-    
+    # Store verifier in callback URL instead of cookie
+    callback_url = f"{SERVER_BASE_URL}/auth/magic-link/callback?isSignUp=false"
+    callback_url += f"&verifier={verifier}"
+
     email_url = f"{GEL_AUTH_BASE_URL}/magic-link/email"
-    callback_url = f"{SERVER_BASE_URL}/auth/magic-link/callback"
 
     async with httpx.AsyncClient() as http_client:
         magic_link_response = await http_client.post(
@@ -45,30 +65,36 @@ async def request_magic_link(request_data: MagicLinkRequest, response: Response)
                 "email": request_data.email,
                 "provider": "builtin::local_magic_link",
                 "callback_url": callback_url,
+                "redirect_on_failure": f"{SERVER_BASE_URL}/auth/error.html"
             }
         )
-    
+
+    # Log the response for debugging
+    print(f"GEL auth response status: {magic_link_response.status_code}")
+    print(f"GEL auth response body: {await magic_link_response.aread()}")
+
     if magic_link_response.status_code == 200:
         return {"message": "Magic link sent! Check your email."}
     else:
-        # User doesn't exist - they need to sign up
+        # Handle different error cases from GEL auth
+        error_body = await magic_link_response.aread()
+        print(f"GEL auth error: {error_body}")
         raise HTTPException(
-            status_code=404, 
-            detail="User not found. Please sign up first."
+            status_code=magic_link_response.status_code,
+            detail=f"Authentication error: {error_body.decode('utf-8') if isinstance(error_body, bytes) else error_body}"
         )
 
 @router.post("/auth/magic-link/signup")
 async def signup_magic_link(request_data: MagicLinkRequest, response: Response):
     """Register a NEW user with magic link."""
     verifier, challenge = generate_pkce()
-    response.set_cookie(
-        key="gel-pkce-verifier", value=verifier,
-        httponly=True, secure=True, samesite='strict', max_age=900
-    )
-    
+    # Store verifier in callback URL instead of cookie
+    callback_url = f"{SERVER_BASE_URL}/auth/magic-link/callback?isSignUp=true"
+    callback_url += f"&first_name={request_data.first_name}&last_name={request_data.last_name}"
+    callback_url += f"&phone={request_data.phone}&country={request_data.country}"
+    callback_url += f"&verifier={verifier}"
+
     register_url = f"{GEL_AUTH_BASE_URL}/magic-link/register"
-    callback_url = f"{SERVER_BASE_URL}/auth/magic-link/callback"
-    callback_url += "?isSignUp=true"  # Signal this is a signup
     
     async with httpx.AsyncClient() as http_client:
         # Log the request details for debugging
@@ -109,26 +135,30 @@ async def magic_link_callback(
     code: str = None,
     error: str = None,
     isSignUp: str = None,
-    gel_pkce_verifier: str = Cookie(None)
+    first_name: str = None,
+    last_name: str = None,
+    phone: str = None,
+    country: str = None,
+    verifier: str = None
 ):
     """Handle magic link callback and create User if needed."""
     if error:
         raise HTTPException(status_code=400, detail=f"Magic link error: {error}")
-    if not code or not gel_pkce_verifier:
+    if not code or not verifier:
         raise HTTPException(status_code=400, detail="Missing info for magic link auth.")
 
     # Exchange code for token
     token_url = f"{GEL_AUTH_BASE_URL}/token"
     async with httpx.AsyncClient() as http_client:
         token_response = await http_client.get(
-            token_url, 
-            params={"code": code, "verifier": gel_pkce_verifier}
+            token_url,
+            params={"code": code, "verifier": verifier}
         )
-    
+
     if token_response.status_code != 200:
         error_text = await token_response.aread()
         raise HTTPException(status_code=400, detail=f"Token exchange failed: {error_text}")
-    
+
     token_data = token_response.json()
     auth_token = token_data.get("auth_token")
     identity_id = token_data.get("identity_id")
@@ -136,22 +166,84 @@ async def magic_link_callback(
     # If this is a signup, create the User object
     if isSignUp == "true" and identity_id:
         try:
-            await client.query("""
-                with identity := <ext::auth::Identity><uuid>$identity_id,
-                     emailFactor := (
-                         select ext::auth::EmailFactor 
-                         filter .identity = identity
-                     )
-                insert User {
-                    email := emailFactor.email,
-                    name := emailFactor.email,  # Default name to email
-                    identity := identity
-                };
+            # Get the email from the identity
+            print(f"Getting email for identity_id: {identity_id}")
+            email = await client.query_single("""
+            with identity := <ext::auth::Identity><uuid>$identity_id
+            select (
+                select ext::auth::EmailFactor
+                filter .identity = identity
+                limit 1
+            ).email
             """, identity_id=identity_id)
+            print(f"Retrieved email: {email}")
+
+            # Clean up the phone number to match the database format
+            clean_phone = phone.replace("tel: ", "").replace(" ", "").replace("-", "")
+            print(f"Cleaned phone number: {clean_phone}")
+
+            # Create user using the same pattern as the working user creation
+            try:
+                print(f"Attempting to create user with: first_name={first_name}, last_name={last_name}, email={email}, phone={clean_phone}, country={country}")
+                created_user = await create_user_qry.create_user(
+                    client,
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    phone=clean_phone,
+                    country=country
+                )
+                print(f"User created successfully: {created_user}")
+
+                # Link the user to the identity
+                print(f"Linking user {created_user.id} to identity {identity_id}")
+                await client.query_single("""
+                with
+                    user := <default::User><uuid>$user_id,
+                    identity := <ext::auth::Identity><uuid>$identity_id
+                select user {
+                    identity := identity
+                }
+                """, user_id=created_user.id, identity_id=identity_id)
+                print(f"User linked to identity successfully")
+
+                # Redirect to a success page
+                response = JSONResponse(content={"message": "Signup successful! You can now log in."})
+                response.set_cookie("gel-auth-token", auth_token, httponly=True, secure=True, samesite='strict')
+                response.delete_cookie("gel-pkce-verifier")
+                return response
+            except gel.errors.ConstraintViolationError as e:
+                print(f"Constraint violation when creating user: {e}")
+                # This means the user already exists, try to link to identity
+                try:
+                    # Try to find the existing user by email
+                    existing_user = await client.query_single("""
+                    select User
+                    filter .email = <str>$email
+                    limit 1
+                    """, email=email)
+                    if existing_user:
+                        print(f"Found existing user: {existing_user.id}, linking to identity")
+                        # Link the existing user to the identity
+                        await client.query_single("""
+                        with
+                            user := <default::User><uuid>$user_id,
+                            identity := <ext::auth::Identity><uuid>$identity_id
+                        select user {
+                            identity := identity
+                        }
+                        """, user_id=existing_user.id, identity_id=identity_id)
+                        print(f"Existing user linked to identity successfully")
+                except Exception as link_e:
+                    print(f"Error linking existing user to identity: {link_e}")
+            except Exception as e:
+                print(f"Error creating user: {e}")
+                # Continue anyway - the identity exists
         except Exception as e:
-            print(f"Error creating user: {e}")
+            print(f"Error getting email: {e}")
             # Continue anyway - the identity exists
 
+    # For login, just set the auth token
     response = JSONResponse(content={"message": "Authentication successful!"})
     response.set_cookie("gel-auth-token", auth_token, httponly=True, secure=True, samesite='strict')
     response.delete_cookie("gel-pkce-verifier")
