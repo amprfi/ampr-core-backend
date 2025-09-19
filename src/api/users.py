@@ -8,9 +8,9 @@ import gel
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from ..queries import get_user_by_email_async_edgeql as get_user_by_email_qry
-from ..queries import get_users_async_edgeql as get_users_qry
-from ..queries import create_user_async_edgeql as create_user_qry
+from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
+from ..queries.users import get_users_async_edgeql as get_users_qry
+from ..queries.users import create_user_async_edgeql as create_user_qry
 
 from ..models.user import UserCreate, UserResponse, UserUpdate
 

@@ -13,8 +13,8 @@ from pydantic_extra_types.phone_numbers import PhoneNumber
 from dotenv import load_dotenv
 load_dotenv()
 
-from ..queries import create_user_async_edgeql as create_user_qry
-from ..queries import get_user_by_email_async_edgeql as get_user_by_email_qry
+from ..queries.users import create_user_async_edgeql as create_user_qry
+from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
 
 router = APIRouter()
 client = gel.create_async_client()
