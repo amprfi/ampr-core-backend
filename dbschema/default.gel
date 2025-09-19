@@ -1,6 +1,7 @@
 using extension auth;
+global accessControl::current_user: uuid;
 
-module default {
+module accessControl {
 
   type User {
     required first_name: str;
@@ -23,5 +24,51 @@ module default {
     identity: ext::auth::Identity {
       constraint exclusive;
     };
+  }
+}
+
+module messaging {
+
+  type Message {
+      required role: str; # "user" or "assistant" 
+      required content: str;
+      required chat: Chat;
+      created_at: datetime {
+          default := datetime_current();
+      };
+      
+      is_archived: bool {
+          default := false;
+      };
+
+      access policy owner_only 
+        allow all 
+        using (global accessControl::current_user ?= .chat.owner.id)
+  }
+
+  type Chat {
+    required owner: accessControl::User;
+    required created_at: datetime {
+        default := datetime_current();
+    };
+    
+    # All messages including archived ones
+    multi archive: Message;
+    
+    # Recent messages (not archived)
+    multi recent_messages := (
+        select .archive
+        filter not .is_archived
+    );
+
+    # Historical messages (archived)
+    multi historical_messages := (
+        select .archive
+        filter .is_archived
+    );
+
+    access policy owner_only 
+        allow all 
+        using (global accessControl::current_user ?= .owner.id)
   }
 }

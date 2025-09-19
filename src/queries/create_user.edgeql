@@ -1,5 +1,5 @@
 select (
-    insert User {
+    insert accessControl::User {
         first_name := <str>$first_name,
         last_name := <str>$last_name,
         email := <str>$email,

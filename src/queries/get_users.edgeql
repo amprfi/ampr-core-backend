@@ -1,1 +1,1 @@
-select User {first_name, last_name, email};
+select accessControl::User {first_name, last_name, email};

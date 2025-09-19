@@ -199,7 +199,7 @@ async def magic_link_callback(
                 print(f"Linking user {created_user.id} to identity {identity_id}")
                 await client.query_single("""
                 with
-                    user := <default::User><uuid>$user_id,
+                    user := <accessControl::User><uuid>$user_id,
                     identity := <ext::auth::Identity><uuid>$identity_id
                 select user {
                     identity := identity
@@ -227,7 +227,7 @@ async def magic_link_callback(
                         # Link the existing user to the identity
                         await client.query_single("""
                         with
-                            user := <default::User><uuid>$user_id,
+                            user := <accessControl::User><uuid>$user_id,
                             identity := <ext::auth::Identity><uuid>$identity_id
                         select user {
                             identity := identity

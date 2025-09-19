@@ -37,6 +37,6 @@ async def get_users(
 ) -> list[GetUsersResult]:
     return await executor.query(
         """\
-        select User {first_name, last_name, email};\
+        select accessControl::User {first_name, last_name, email};\
         """,
     )
