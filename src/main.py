@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api import users
 from .api import auth
+from .api import chat
+from .api import debug
 
 fast_api = FastAPI()
 
@@ -20,6 +22,10 @@ fast_api.add_middleware(
 fast_api.include_router(users.router, prefix="/api")
 
 fast_api.include_router(auth.router, prefix="/api")
+
+fast_api.include_router(chat.router, prefix="/api")
+
+fast_api.include_router(debug.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():

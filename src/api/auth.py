@@ -22,6 +22,35 @@ client = gel.create_async_client()
 GEL_AUTH_BASE_URL = os.getenv("GEL_AUTH_BASE_URL")
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:8000/api")
 
+def get_configured_client(request: Request) -> gel.AsyncIOClient:
+    """Configure the Gel client with the auth token from cookies or headers."""
+    auth_token = request.cookies.get("gel-auth-token")
+
+    if not auth_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            auth_token = auth_header.split(" ")[1]
+        elif not auth_token:
+            auth_token = request.headers.get("X-Gel-Auth-Token")
+
+    if not auth_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Please log in first."
+        )
+
+    gel_client = gel.create_async_client()
+
+    try:
+        gel_client = gel_client.with_globals({"ext::auth::client_token": auth_token})
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid authentication token: {str(e)}"
+        )
+
+    return gel_client
+
 class MagicLinkRequest(BaseModel):
     email: EmailStr
     first_name: str = Field(..., min_length=1, max_length=100)
@@ -163,12 +192,16 @@ async def magic_link_callback(
     auth_token = token_data.get("auth_token")
     identity_id = token_data.get("identity_id")
 
+    # Create a configured client with the auth token
+    gel_client = gel.create_async_client()
+    gel_client = gel_client.with_globals({"ext::auth::client_token": auth_token})
+
     # If this is a signup, create the User object
     if isSignUp == "true" and identity_id:
         try:
             # Get the email from the identity
             print(f"Getting email for identity_id: {identity_id}")
-            email = await client.query_single("""
+            email = await gel_client.query_single("""
             with identity := <ext::auth::Identity><uuid>$identity_id
             select (
                 select ext::auth::EmailFactor
@@ -186,7 +219,7 @@ async def magic_link_callback(
             try:
                 print(f"Attempting to create user with: first_name={first_name}, last_name={last_name}, email={email}, phone={clean_phone}, country={country}")
                 created_user = await create_user_qry.create_user(
-                    client,
+                    gel_client,
                     first_name=first_name,
                     last_name=last_name,
                     email=email,
@@ -197,7 +230,7 @@ async def magic_link_callback(
 
                 # Link the user to the identity
                 print(f"Linking user {created_user.id} to identity {identity_id}")
-                await client.query_single("""
+                await gel_client.query_single("""
                 with
                     user := <accessControl::User><uuid>$user_id,
                     identity := <ext::auth::Identity><uuid>$identity_id
@@ -217,7 +250,7 @@ async def magic_link_callback(
                 # This means the user already exists, try to link to identity
                 try:
                     # Try to find the existing user by email
-                    existing_user = await client.query_single("""
+                    existing_user = await gel_client.query_single("""
                     select User
                     filter .email = <str>$email
                     limit 1
@@ -225,7 +258,7 @@ async def magic_link_callback(
                     if existing_user:
                         print(f"Found existing user: {existing_user.id}, linking to identity")
                         # Link the existing user to the identity
-                        await client.query_single("""
+                        await gel_client.query_single("""
                         with
                             user := <accessControl::User><uuid>$user_id,
                             identity := <ext::auth::Identity><uuid>$identity_id

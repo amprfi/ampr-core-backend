@@ -1,12 +1,5 @@
-select (
-    insert messaging::Chat {
-        owner := (select accessControl::User filter .id = <uuid>$user_id)
-    }
-) {
-    id,
-    created_at,
-    owner: {
-        id,
-        email
-    }
-};
+with
+    user := (select accessControl::User filter .id = <uuid>$user_id)
+insert messaging::Chat {
+    owner := user,
+}

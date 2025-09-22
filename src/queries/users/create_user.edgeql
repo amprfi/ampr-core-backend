@@ -4,7 +4,8 @@ select (
         last_name := <str>$last_name,
         email := <str>$email,
         phone := <str>$phone,
-        country := <str>$country
+        country := <str>$country,
+        identity := (global ext::auth::ClientTokenIdentity)
     }
 ) {
     first_name,
@@ -12,5 +13,6 @@ select (
     email,
     phone,
     country,
+    identity,
     created_at
 };
