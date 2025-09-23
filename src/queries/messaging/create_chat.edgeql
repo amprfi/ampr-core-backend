@@ -1,5 +1,9 @@
 with
-    user := (select accessControl::User filter .id = <uuid>$user_id)
-insert messaging::Chat {
-    owner := user,
+    user := assert_exists((select accessControl::User filter .id = <uuid>$user_id))
+select (
+    insert messaging::Chat {
+        owner := user
+    }
+) {
+    id
 }

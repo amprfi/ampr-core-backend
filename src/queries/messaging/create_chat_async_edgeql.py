@@ -37,9 +37,13 @@ async def create_chat(
     return await executor.query_single(
         """\
         with
-            user := (select accessControl::User filter .id = <uuid>$user_id)
-        insert messaging::Chat {
-            owner := user,
+            user := assert_exists((select accessControl::User filter .id = <uuid>$user_id))
+        select (
+            insert messaging::Chat {
+                owner := user
+            }
+        ) {
+            id
         }\
         """,
         user_id=user_id,

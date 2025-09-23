@@ -68,7 +68,7 @@ module messaging {
     );
 
     access policy owner_only
-        allow all
-        using (global accessControl::current_user ?= .owner.id)
+       allow all
+       using (global accessControl::current_user ?= .owner.id)
   }
 }

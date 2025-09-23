@@ -22,9 +22,9 @@ client = gel.create_async_client()
 GEL_AUTH_BASE_URL = os.getenv("GEL_AUTH_BASE_URL")
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:8000/api")
 
-def get_configured_client(request: Request) -> AsyncIOClient:
-    """Configure the Gel client with the auth token from cookies or headers."""
-    
+async def get_authenticated_client_with_user(request: Request) -> AsyncIOClient:
+    """Get a fully configured client with both auth token and current_user global set."""
+
     auth_token = request.cookies.get("gel-auth-token")
     if not auth_token:
         auth_header = request.headers.get("Authorization")
@@ -40,35 +40,16 @@ def get_configured_client(request: Request) -> AsyncIOClient:
         )
 
     gel_client = gel.create_async_client()
-    
+
     try:
         # Set the auth token - this should be enough for basic authentication
         gel_client = gel_client.with_globals({"ext::auth::client_token": auth_token})
         print("Successfully configured client with auth token")
-    except Exception as e:
-        print(f"Error configuring client: {str(e)}")
-        raise HTTPException(
-            status_code=401,
-            detail=f"Invalid authentication token: {str(e)}"
-        )
 
-    return gel_client
-
-async def get_authenticated_client_with_user(request: Request) -> AsyncIOClient:
-    """Get a fully configured client with both auth token and current_user global set."""
-    
-    gel_client = get_configured_client(request)
-    
-    try:
         # Get the current user
         user_result = await get_current_user_id(executor=gel_client)
         if user_result and user_result.id:
             # Create a new client with both auth token and current_user
-            auth_token = request.cookies.get("gel-auth-token") or \
-                        (request.headers.get("Authorization", "").split(" ")[1] if 
-                         request.headers.get("Authorization", "").startswith("Bearer ") else None) or \
-                        request.headers.get("X-Gel-Auth-Token")
-            
             gel_client = gel.create_async_client().with_globals({
                 "accessControl::current_user": user_result.id,
                 "ext::auth::client_token": auth_token
@@ -80,12 +61,12 @@ async def get_authenticated_client_with_user(request: Request) -> AsyncIOClient:
                 detail="Could not determine current user"
             )
     except Exception as e:
-        print(f"Error setting current_user: {str(e)}")
+        print(f"Error configuring client: {str(e)}")
         raise HTTPException(
             status_code=401,
-            detail=f"User authentication failed: {str(e)}"
+            detail=f"Invalid authentication token: {str(e)}"
         )
-    
+
     return gel_client
 
 class MessageRequest(BaseModel):
@@ -186,31 +167,28 @@ async def create_chat(
 ) -> CommonChat:
     """Create a new chat"""
     
-    # Get user ID (should work now since current_user global is set)
+    # The client already has accessControl::current_user set, so we just need 
+    # to get the user_id that was used to set it
     try:
         user_result = await get_current_user_id(executor=gel_client)
         if user_result is None:
-            raise HTTPException(
-                status_code=401,
-                detail="User authentication failed"
-            )
+            raise HTTPException(status_code=401, detail="User authentication failed")
+        
         user_id = user_result.id
-    except Exception as e:
-        raise HTTPException(
-            status_code=401,
-            detail=f"User authentication failed: {str(e)}"
-        )
+        print(f"DEBUG: Using user_id: {user_id}")
 
-    # Create the chat (this should now work with proper access policies)
-    try:
-        result = await create_chat_query(
-            executor=gel_client,
-            user_id=user_id,
-        )
+        current_global = await gel_client.query_single("select global accessControl::current_user")
+        print(f"DEBUG: Current global user: {current_global}")
+        
+        # This should now work since the global is already set
+        result = await create_chat_query(executor=gel_client, user_id=user_id)
+        print(f"DEBUG: create_chat_query result: {result}")
+        
+        return CommonChat.from_gel_result(result)
+        
     except Exception as e:
+        print(f"DEBUG: Exception in create_chat: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create chat: {str(e)}"
         )
-
-    return CommonChat.from_gel_result(result)
