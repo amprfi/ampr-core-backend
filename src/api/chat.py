@@ -90,21 +90,25 @@ async def get_chat(
 
     return CommonChat.from_gel_result(result)
 
-@router.post("/chat/{chat_id}/message")
+@router.post("/chat/message")
 async def send_message(
-    chat_id: uuid.UUID,
-    user_id: uuid.UUID,
     message_request: MessageRequest,
-    gel_client: AsyncIOClient = Depends(lambda: client)
+    gel_client: AsyncIOClient = Depends(get_authenticated_client_with_user)
 ):
     """Send a message to a chat and stream the response"""
     from src.queries.messaging.create_message_async_edgeql import create_message as create_message_query
+
+    # Get user_id from the authenticated client
+    user_result = await get_current_user_id(executor=gel_client)
+    if user_result is None:
+        raise HTTPException(status_code=401, detail="User authentication failed")
+    user_id = user_result.id
 
     # Store the user message first
     await create_message_query(
         executor=gel_client,
         user_id=user_id,
-        chat_id=chat_id,
+        chat_id=message_request.chat_id,
         role=message_request.message.role,
         content=message_request.message.content
     )
@@ -134,15 +138,15 @@ async def send_message(
         # Store the assistant's response
         await gel_client.query(
             """
-            insert Message {
-                chat := (select assert_exists((select Chat filter .id = $chat_id))),
-                llm_role := 'assistant',
-                body := $content,
+            insert messaging::Message {
+                chat := (select assert_exists((select messaging::Chat filter .id = <uuid>$chat_id))),
+                role := 'assistant',
+                content := <str>$content,
                 created_at := datetime_current(),
-                is_evicted := false,
+                is_archived := false,
             }
             """,
-            chat_id=chat_id,
+            chat_id=message_request.chat_id,
             content=full_response,
         )
         
