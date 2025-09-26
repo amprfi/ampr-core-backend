@@ -1,6 +1,5 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from gel import AsyncIOClient
@@ -95,7 +94,7 @@ async def send_message(
     message_request: MessageRequest,
     gel_client: AsyncIOClient = Depends(get_authenticated_client_with_user)
 ):
-    """Send a message to a chat and stream the response"""
+    """Send a message to a chat and return the response"""
     from src.queries.messaging.create_message_async_edgeql import create_message as create_message_query
 
     # Get user_id from the authenticated client
@@ -113,56 +112,39 @@ async def send_message(
         content=message_request.message.content
     )
 
-    async def generate_response():
-        # Send thinking status
-        yield f"data: {json.dumps({'type': 'status', 'message': '*thinking...*'})}\n\n"
-        
-        # Get the talker agent
-        amprChat_agent = get_amprChat_agent()
-        
-        # Create the context (simplified without memory components)
-        context = TalkerContext(
-            gel_client=gel_client,
-        )
-        
-        # Stream the agent response
-        full_response = ""
-        async with amprChat_agent.run_stream(
-            message_request.message.content or "",
-            deps=context,
-        ) as result:
-            async for text in result.stream_text():
-                full_response += text
-                yield f"data: {json.dumps({'type': 'token', 'content': text})}\n\n"
-        
-        # Store the assistant's response
-        await gel_client.query(
-            """
-            insert messaging::Message {
-                chat := (select assert_exists((select messaging::Chat filter .id = <uuid>$chat_id))),
-                role := 'assistant',
-                content := <str>$content,
-                created_at := datetime_current(),
-                is_archived := false,
-            }
-            """,
-            chat_id=message_request.chat_id,
-            content=full_response,
-        )
-        
-        # Send completion signal
-        yield f"data: {json.dumps({'type': 'complete'})}\n\n"
+    # Get the talker agent
+    amprChat_agent = get_amprChat_agent()
 
-    return StreamingResponse(
-        generate_response(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control",
-        },
+    # Create the context (simplified without memory components)
+    context = TalkerContext(
+        gel_client=gel_client,
     )
+
+    # Get the agent response
+    result = await amprChat_agent.run(
+        message_request.message.content or "",
+        deps=context,
+    )
+
+    # Extract the output string from the AgentRunResult
+    response_content = result.output
+
+    # Store the assistant's response
+    await gel_client.query(
+        """
+        insert messaging::Message {
+            chat := (select assert_exists((select messaging::Chat filter .id = <uuid>$chat_id))),
+            role := 'assistant',
+            content := <str>$content,
+            created_at := datetime_current(),
+            is_archived := false,
+        }
+        """,
+        chat_id=message_request.chat_id,
+        content=response_content,
+    )
+
+    return {"response": response_content}
 
 @router.post("/chat")
 async def create_chat(
