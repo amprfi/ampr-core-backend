@@ -5,6 +5,7 @@ from http import HTTPStatus
 from typing import List
 
 import gel
+from src.clients.gel_client import create_basic_client, ConstraintViolationError
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -17,7 +18,7 @@ from ..models.user import UserCreate, UserResponse, UserUpdate
 # ---------------------------------------------------------------- #
 
 router = APIRouter()
-client = gel.create_async_client()
+client = create_basic_client()
 
 class RequestData(BaseModel):
     email: str
@@ -56,9 +57,9 @@ async def post_user(user: RequestData) -> create_user_qry.CreateUserResult:
             phone=user.phone,
             country=user.country
         )
-    except gel.errors.ConstraintViolationError:
+    except ConstraintViolationError as e:
         raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"error": f"Username '{user.email}' already exists."},
+            status_code=e.status_code,
+            detail={"error": str(e)}
         )
     return created_user
