@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from .api import users
 from .api import auth
@@ -30,3 +32,12 @@ fast_api.include_router(debug.router, prefix="/api")
 @fast_api.get("/")
 async def root():
     return {"message": "Hello from Ampr"}
+
+@fast_api.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    print(f"VALIDATION ERROR DETAILS: {exc.errors()}")
+    print(f"VALIDATION ERROR BODY: {exc.body}")
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body},
+    )

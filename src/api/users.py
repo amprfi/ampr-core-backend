@@ -4,7 +4,6 @@ import datetime
 from http import HTTPStatus
 from typing import List
 
-import gel
 from src.clients.gel_client import create_basic_client, ConstraintViolationError
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel

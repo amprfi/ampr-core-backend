@@ -3,12 +3,16 @@ import secrets
 import hashlib
 import base64
 import httpx
-import gel
 from fastapi import APIRouter, Response, Request, HTTPException, Cookie
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_extra_types.country import CountryAlpha3
 from pydantic_extra_types.phone_numbers import PhoneNumber
+from src.clients.gel_client import create_basic_client, create_authenticated_client, AuthenticationError, ConstraintViolationError
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gel import AsyncIOClient
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -17,13 +21,13 @@ from ..queries.users import create_user_async_edgeql as create_user_qry
 from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
 
 router = APIRouter()
-client = gel.create_async_client()
 
+client = create_basic_client()
 GEL_AUTH_BASE_URL = os.getenv("GEL_AUTH_BASE_URL")
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:8000/api")
 
-def get_configured_client(request: Request) -> gel.AsyncIOClient:
-    """Configure the Gel client with the auth token from cookies or headers."""
+def get_auth_token_from_request(request: Request) -> str:
+    """Extract the auth token from cookies or headers in the request."""
     auth_token = request.cookies.get("gel-auth-token")
 
     if not auth_token:
@@ -39,17 +43,12 @@ def get_configured_client(request: Request) -> gel.AsyncIOClient:
             detail="Authentication required. Please log in first."
         )
 
-    gel_client = gel.create_async_client()
+    return auth_token
 
-    try:
-        gel_client = gel_client.with_globals({"ext::auth::client_token": auth_token})
-    except Exception as e:
-        raise HTTPException(
-            status_code=401,
-            detail=f"Invalid authentication token: {str(e)}"
-        )
-
-    return gel_client
+def get_configured_client(request: Request) -> 'AsyncIOClient':
+    """Configure the Gel client with the auth token from the request."""
+    auth_token = get_auth_token_from_request(request)
+    return create_authenticated_client(auth_token)
 
 class MagicLinkRequest(BaseModel):
     email: EmailStr
@@ -116,11 +115,16 @@ async def request_magic_link(request_data: MagicLinkLoginRequest, response: Resp
 @router.post("/auth/magic-link/signup")
 async def signup_magic_link(request_data: MagicLinkRequest, response: Response):
     """Register a NEW user with magic link."""
+    phone_str = str(request_data.phone)
+    country_str = str(request_data.country)
+
+    print(f"Phone object type: {type(request_data.phone)}, value: {request_data.phone}")
+
     verifier, challenge = generate_pkce()
     # Store verifier in callback URL instead of cookie
     callback_url = f"{SERVER_BASE_URL}/auth/magic-link/callback?isSignUp=true"
     callback_url += f"&first_name={request_data.first_name}&last_name={request_data.last_name}"
-    callback_url += f"&phone={request_data.phone}&country={request_data.country}"
+    callback_url += f"&phone={phone_str}&country={country_str}"
     callback_url += f"&verifier={verifier}"
 
     register_url = f"{GEL_AUTH_BASE_URL}/magic-link/register"
@@ -193,8 +197,7 @@ async def magic_link_callback(
     identity_id = token_data.get("identity_id")
 
     # Create a configured client with the auth token
-    gel_client = gel.create_async_client()
-    gel_client = gel_client.with_globals({"ext::auth::client_token": auth_token})
+    gel_client = create_authenticated_client(auth_token)
 
     # If this is a signup, create the User object
     if isSignUp == "true" and identity_id:
@@ -245,7 +248,7 @@ async def magic_link_callback(
                 response.set_cookie("gel-auth-token", auth_token, httponly=True, secure=True, samesite='strict')
                 response.delete_cookie("gel-pkce-verifier")
                 return response
-            except gel.errors.ConstraintViolationError as e:
+            except ConstraintViolationError as e:
                 print(f"Constraint violation when creating user: {e}")
                 # This means the user already exists, try to link to identity
                 try:
