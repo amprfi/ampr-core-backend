@@ -30,6 +30,8 @@ class GetUserByEmailResult(NoPydanticValidation):
     first_name: str
     last_name: str
     email: str
+    phone: str
+    country: str
 
 
 async def get_user_by_email(
@@ -39,7 +41,14 @@ async def get_user_by_email(
 ) -> GetUserByEmailResult | None:
     return await executor.query_single(
         """\
-        select accessControl::User {first_name, last_name, email}
+        select accessControl::User {
+            id,
+            first_name,
+            last_name, 
+            email,
+            phone,
+            country
+            }
         filter accessControl::User.email = <str>$email\
         """,
         email=email,

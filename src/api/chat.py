@@ -61,7 +61,7 @@ async def get_authenticated_client_with_user(request: Request) -> AsyncIOClient:
         )
 
 class MessageRequest(BaseModel):
-    chat_id: uuid.UUID
+    chat_id: uuid.UUID | None = None
     message: CommonMessage
 
 @router.get("/chat/{chat_id}")
@@ -101,11 +101,13 @@ async def send_message(
     user_id = user_result.id
 
     # Store the user message first
+    # Use message channel if available, otherwise default to "chat"
+    channel = message_request.message.channel or "chat"
     await create_message_query(
         executor=gel_client,
         user_id=user_id,
-        chat_id=message_request.chat_id,
         role=message_request.message.role,
+        channel=channel,
         content=message_request.message.content
     )
 
@@ -134,11 +136,13 @@ async def send_message(
             role := 'assistant',
             content := <str>$content,
             created_at := datetime_current(),
+            channel := <str>$channel,
             is_archived := false,
         }
         """,
         chat_id=message_request.chat_id,
         content=response_content,
+        channel="chat",  # Use same channel as user message
     )
 
     return {"response": response_content}

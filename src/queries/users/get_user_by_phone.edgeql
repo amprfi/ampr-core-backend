@@ -6,4 +6,4 @@ select accessControl::User {
     phone,
     country
     }
-filter accessControl::User.email = <str>$email
+filter accessControl::User.phone = <str>$phone

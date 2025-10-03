@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
 from ..queries.users import get_users_async_edgeql as get_users_qry
 from ..queries.users import create_user_async_edgeql as create_user_qry
-from ..queries.messaging import get_user_by_phone_async_edgeql as get_user_by_phone_qry
+from ..queries.users import get_user_by_phone_async_edgeql as get_user_by_phone_qry
 
 from ..models.user import UserCreate, UserResponse, UserUpdate
 
@@ -42,7 +42,7 @@ async def get_users(
             )
         return user
     elif phone:
-        user = await get_user_by_phone_qry.get_user_by_phone(client, phone_number=phone)
+        user = await get_user_by_phone_qry.get_user_by_phone(client, phone=phone)
         if not user:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
