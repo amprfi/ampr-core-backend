@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_extra_types.country import CountryAlpha3
 from pydantic_extra_types.phone_numbers import PhoneNumber
-from src.clients.gel_client import create_basic_client, create_authenticated_client, AuthenticationError, ConstraintViolationError
+from src.clients.gel_client import create_basic_client, create_authenticated_client, create_authenticated_client_with_user, AuthenticationError, ConstraintViolationError
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -45,10 +45,21 @@ def get_auth_token_from_request(request: Request) -> str:
 
     return auth_token
 
-def get_configured_client(request: Request) -> 'AsyncIOClient':
+async def get_configured_client(request: Request) -> 'AsyncIOClient':
     """Configure the Gel client with the auth token from the request."""
     auth_token = get_auth_token_from_request(request)
-    return create_authenticated_client(auth_token)
+
+    # Get the current user ID
+    basic_client = create_authenticated_client(auth_token)
+    try:
+        from ..queries.users.get_current_user_id_async_edgeql import get_current_user_id
+        user_result = await get_current_user_id(executor=basic_client)
+        if user_result and user_result.id:
+            return create_authenticated_client_with_user(auth_token, user_result.id)
+        return create_authenticated_client(auth_token)
+    except Exception:
+        # Fallback to basic authenticated client if we can't get user info
+        return create_authenticated_client(auth_token)
 
 class MagicLinkRequest(BaseModel):
     email: EmailStr

@@ -9,6 +9,7 @@ from .api import users
 from .api import auth
 from .api import chat
 from .api import debug
+from .api import webhooks
 
 fast_api = FastAPI()
 
@@ -28,6 +29,8 @@ fast_api.include_router(auth.router, prefix="/api")
 fast_api.include_router(chat.router, prefix="/api")
 
 fast_api.include_router(debug.router, prefix="/api")
+
+fast_api.include_router(webhooks.router)
 
 @fast_api.get("/")
 async def root():

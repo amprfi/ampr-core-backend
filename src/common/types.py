@@ -14,21 +14,23 @@ from pydantic_ai.messages import ModelRequest, ModelResponse
 
 class CommonMessage(BaseModel):
     role: str
+    channel: str | None = None
     content: str | None = None
     tool_name: str | None = None
     tool_args: dict | None = None
     created_at: datetime.datetime | None = None
-    is_evicted: bool = False
+    is_archived: bool = False
 
     @classmethod
     def from_gel_result(cls, result: dict):
         return cls(
             role=result.llm_role,
+            channel=result.channel,
             content=result.body,
             tool_name=result.tool_name,
             tool_args=result.tool_args,
             created_at=result.created_at,
-            is_evicted=result.is_evicted,
+            is_archived=result.is_archived,
         )
 
     @classmethod
@@ -80,7 +82,8 @@ class CommonMessage(BaseModel):
             "tool_name": self.tool_name,
             "tool_args": self.tool_args,
             "created_at": self.created_at,
-            "is_evicted": self.is_evicted,
+            "is_archived": self.is_archived,
+            "channel": self.channel,
         }
 
     def to_pydantic_ai_message_part(self):

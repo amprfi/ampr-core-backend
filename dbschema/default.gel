@@ -31,6 +31,7 @@ module messaging {
 
   type Message {
       required role: str; # "user" or "assistant"
+      required channel: str; #"application", "sms", "whatsapp", or "email"
       required content: str;
       required chat: Chat;
       created_at: datetime {

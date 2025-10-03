@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
 from ..queries.users import get_users_async_edgeql as get_users_qry
 from ..queries.users import create_user_async_edgeql as create_user_qry
+from ..queries.messaging import get_user_by_phone_async_edgeql as get_user_by_phone_qry
 
 from ..models.user import UserCreate, UserResponse, UserUpdate
 
@@ -28,13 +29,11 @@ class RequestData(BaseModel):
  
 @router.get("/users")
 async def get_users(
-    email: str = Query(None, max_length=50)
-) -> List[get_users_qry.GetUsersResult] | get_user_by_email_qry.GetUserByEmailResult:
+    email: str = Query(None, max_length=50),
+    phone: str = Query(None, max_length=20)
+) -> List[get_users_qry.GetUsersResult] | get_user_by_email_qry.GetUserByEmailResult | get_user_by_phone_qry.GetUserByPhoneResult:
 
-    if not email:
-        users = await get_users_qry.get_users(client)
-        return users
-    else:
+    if email:
         user = await get_user_by_email_qry.get_user_by_email(client, email=email)
         if not user:
             raise HTTPException(
@@ -42,6 +41,17 @@ async def get_users(
                 detail={"error": f"Username '{email}' does not exist."},
             )
         return user
+    elif phone:
+        user = await get_user_by_phone_qry.get_user_by_phone(client, phone_number=phone)
+        if not user:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail={"error": f"User with phone '{phone}' does not exist."},
+            )
+        return user
+    else:
+        users = await get_users_qry.get_users(client)
+        return users
     
 ...
 @router.post("/users", status_code=HTTPStatus.CREATED)

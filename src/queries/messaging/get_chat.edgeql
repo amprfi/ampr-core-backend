@@ -3,5 +3,12 @@ with
     chat := (select user.<owner[is messaging::Chat] filter .id = <uuid>$chat_id)
 select assert_exists(chat) {
     id,
-    # We'll add message retrieval later
+    recent_messages: {
+        id,
+        role,
+        channel,
+        content,
+        created_at,
+        is_archived
+    } order by .created_at
 }

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 import dataclasses
+import datetime
 import gel
 import uuid
 
@@ -27,6 +28,17 @@ class NoPydanticValidation:
 @dataclasses.dataclass
 class GetChatResult(NoPydanticValidation):
     id: uuid.UUID
+    recent_messages: list[GetChatResultRecentMessagesItem]
+
+
+@dataclasses.dataclass
+class GetChatResultRecentMessagesItem(NoPydanticValidation):
+    id: uuid.UUID
+    role: str
+    channel: str
+    content: str
+    created_at: datetime.datetime | None
+    is_archived: bool | None
 
 
 async def get_chat(
@@ -42,7 +54,14 @@ async def get_chat(
             chat := (select user.<owner[is messaging::Chat] filter .id = <uuid>$chat_id)
         select assert_exists(chat) {
             id,
-            # We'll add message retrieval later
+            recent_messages: {
+                id,
+                role,
+                channel,
+                content,
+                created_at,
+                is_archived
+            } order by .created_at
         }\
         """,
         user_id=user_id,

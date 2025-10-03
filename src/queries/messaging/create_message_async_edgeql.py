@@ -35,6 +35,7 @@ async def create_message(
     user_id: uuid.UUID,
     chat_id: uuid.UUID,
     role: str,
+    channel: str,
     content: str,
 ) -> CreateMessageResult:
     return await executor.query_single(
@@ -45,6 +46,7 @@ async def create_message(
         insert messaging::Message {
             chat := chat,
             role := <str>$role,
+            channel := <str>$channel,
             content := <str>$content,
             created_at := datetime_current(),
             is_archived := false,
@@ -53,5 +55,6 @@ async def create_message(
         user_id=user_id,
         chat_id=chat_id,
         role=role,
+        channel=channel,
         content=content,
     )
