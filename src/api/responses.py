@@ -11,10 +11,10 @@ from typing import Optional, Dict, Any
 from gel import AsyncIOClient
 import json
 
-from src.agents.amprChat import get_amprChat_agent, TalkerContext
-from src.clients.vonage_client import VonageClient
-from src.queries.messaging.get_chat_by_phone_async_edgeql import get_chat_by_phone
-from src.queries.messaging.create_message_async_edgeql import create_message as create_message_query
+from ..agents.amprChat import get_amprChat_agent, TalkerContext
+from ..clients.vonage_client import VonageClient
+from ..queries.messaging.get_chat_by_phone_async_edgeql import get_chat_by_phone
+from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
 
 # Set up logging
 logger = logging.getLogger(__name__)

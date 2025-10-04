@@ -7,11 +7,11 @@ import gel
 import uuid
 import json
 
-from src.clients.gel_client import create_authenticated_client, create_authenticated_client_with_user, AuthenticationError
-from src.agents.amprChat import get_amprChat_agent, TalkerContext
-from src.common.types import CommonChat, CommonMessage
-from src.queries.users.get_current_user_id_async_edgeql import get_current_user_id
-from src.queries.messaging.create_chat_async_edgeql import create_chat as create_chat_query
+from ..clients.gel_client import create_authenticated_client, create_authenticated_client_with_user, AuthenticationError
+from ..agents.amprChat import get_amprChat_agent, TalkerContext
+from ..common.types import CommonChat, CommonMessage
+from ..queries.users.get_current_user_id_async_edgeql import get_current_user_id
+from ..queries.messaging.create_chat_async_edgeql import create_chat as create_chat_query
 
 from dotenv import load_dotenv
 load_dotenv()

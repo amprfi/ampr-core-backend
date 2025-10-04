@@ -16,11 +16,11 @@ from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel
 import json
 
-from src.clients.gel_client import create_basic_client
-from src.queries.users.get_user_by_phone_async_edgeql import get_user_by_phone
-from src.queries.messaging.get_chat_by_phone_async_edgeql import get_chat_by_phone
-from src.queries.messaging.create_message_async_edgeql import create_message as create_message_query
-from src.api.responses import generate_ai_response, ResponseContext
+from ..clients.gel_client import create_basic_client
+from ..queries.users.get_user_by_phone_async_edgeql import get_user_by_phone
+from ..queries.messaging.get_chat_by_phone_async_edgeql import get_chat_by_phone
+from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
+from ..api.responses import generate_ai_response, ResponseContext
 
 # Set up logging
 logger = logging.getLogger(__name__)
