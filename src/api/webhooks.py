@@ -17,8 +17,10 @@ from pydantic import BaseModel
 import json
 
 from src.clients.gel_client import create_basic_client
+from src.queries.users.get_user_by_phone_async_edgeql import get_user_by_phone
 from src.queries.messaging.get_chat_by_phone_async_edgeql import get_chat_by_phone
 from src.queries.messaging.create_message_async_edgeql import create_message as create_message_query
+from src.api.responses import generate_ai_response, ResponseContext
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -182,7 +184,7 @@ async def handle_inbound_message_post(
         dict: Success message
 
     Raises:
-        HTTPException: If no chat is found for the phone number
+        HTTPException: If no user is found for the phone number
     """
     return await _process_inbound_message(request)
 
@@ -192,7 +194,7 @@ async def handle_inbound_message_get(request: Request):
     Handle inbound SMS messages from Vonage using GET with query parameters.
 
     This endpoint receives SMS messages from Vonage via GET request with query parameters,
-    validates the API key, finds the appropriate chat for the sender's phone number,
+    validates the API key, finds the appropriate user for the sender's phone number,
     and stores the message.
 
     Args:
@@ -202,7 +204,7 @@ async def handle_inbound_message_get(request: Request):
         dict: Success message
 
     Raises:
-        HTTPException: If authentication fails or no chat is found
+        HTTPException: If authentication fails or no user is found
     """
     # Get query parameters directly from request
     query_params = request.query_params
@@ -270,6 +272,11 @@ async def _process_inbound_message(request):
     """
     Common processing logic for inbound messages (used by both GET and POST endpoints).
 
+    This function:
+    1. Extracts the phone number from the message
+    2. Uses the phone number to get the user ID
+    3. Creates a message in the database using the user ID
+
     Args:
         request: The request object (real or mock) containing message data
 
@@ -277,7 +284,7 @@ async def _process_inbound_message(request):
         dict: Success message
 
     Raises:
-        HTTPException: If processing fails
+        HTTPException: If processing fails (no user found, etc.)
     """
     try:
         # Parse the request data
@@ -300,55 +307,71 @@ async def _process_inbound_message(request):
         cleaned_phone = clean_phone_number(from_number)
         logger.info(f"Processing message from phone: {from_number}, cleaned: {cleaned_phone}")
 
-        # Find the chat for this phone number
+        # Step 1: Get user ID by phone number
         try:
-            logger.debug(f"DEBUG: Raw phone number from request: {from_number}")
-            logger.debug(f"DEBUG: Cleaned phone number: {cleaned_phone}")
-            logger.debug(f"DEBUG: Phone number length: {len(cleaned_phone)}")
-            logger.debug(f"DEBUG: Phone number type: {type(cleaned_phone)}")
-            logger.debug(f"DEBUG: Phone number repr: {repr(cleaned_phone)}")
-
-            # Try to get the chat
-            chat_result = await get_chat_by_phone(
+            logger.debug(f"Looking up user by phone: {cleaned_phone}")
+            user_result = await get_user_by_phone(
                 executor=gel_client,
-                phone_number=cleaned_phone
+                phone=cleaned_phone
             )
-            chat_id = chat_result.id
-            logger.info(f"Found existing chat: {chat_id}")
+            user_id = user_result.id
+            logger.info(f"Found user with ID: {user_id}")
         except Exception as e:
-            logger.error(f"No chat found for phone {cleaned_phone}: {e}")
+            logger.error(f"No user found for phone {cleaned_phone}: {e}")
             logger.error(f"Error type: {type(e)}")
             logger.error(f"Error details: {str(e)}")
-            logger.error(f"Stack trace: {traceback.format_exc()}")
-
-            # Try a direct query to see what's in the DB
-            try:
-                logger.debug("Attempting direct query to check phone numbers in DB...")
-                # This is a placeholder - we would need the actual query syntax
-                # all_chats = await gel_client.query("SELECT Chat { phone_number }")
-                # logger.debug(f"All chats in DB: {all_chats}")
-            except Exception as db_e:
-                logger.debug(f"Could not query all chats: {db_e}")
-
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No chat found for phone number {cleaned_phone}"
+                detail=f"No user found for phone number {cleaned_phone}"
             )
 
-        # Create the message in the database
+        # Step 2: Create the message in the database
         message_content = data["text"]
-        logger.info(f"Storing message in chat {chat_id}: {message_content}")
+        logger.info(f"Storing message for user {user_id}: {message_content}")
 
-        await create_message_query(
+        # The create_message function will automatically find or create a chat for the user
+        message_result = await create_message_query(
             executor=gel_client,
-            user_id=None,  # System message (no specific user)
-            chat_id=chat_id,
+            user_id=user_id,  # Use the user ID we found
             role="user",  # Treat as user message
             channel="sms",  # Match the channel in our schema
             content=message_content  # Store just the text content
         )
 
-        logger.info(f"Successfully stored inbound SMS message from {from_number} in chat {chat_id}")
+        logger.info(f"Successfully stored inbound SMS message from {from_number} for user {user_id}")
+
+        # Step 3: Generate AI response
+        try:
+            # Get the chat ID for this phone number
+            chat_results = await get_chat_by_phone(
+                executor=gel_client,
+                phone_number=cleaned_phone
+            )
+
+            if not chat_results or len(chat_results) == 0:
+                logger.error(f"No chat found for phone number {cleaned_phone}")
+                raise ValueError(f"No chat found for phone number {cleaned_phone}")
+
+            chat_id = chat_results[0].id
+
+            # Create response context
+            response_context = ResponseContext(
+                message_content=message_content,
+                chat_id=chat_id,
+                channel="sms",
+                user_id=user_id,
+                gel_client=gel_client,
+                phone_number=from_number
+            )
+
+            # Generate and send AI response
+            await generate_ai_response(response_context)
+            logger.info(f"Successfully generated and sent AI response for SMS from {from_number}")
+
+        except Exception as e:
+            logger.error(f"Error generating AI response for SMS: {str(e)}", exc_info=True)
+            # Continue even if response generation fails to ensure message is stored
+
         return {"status": "success", "message": "Inbound message processed"}
 
     except json.JSONDecodeError as e:

@@ -42,9 +42,6 @@ module messaging {
           default := false;
       };
 
-      access policy owner_only
-        allow all
-        using (global accessControl::current_user ?= .chat.owner.id)
   }
 
   type Chat {
@@ -67,9 +64,5 @@ module messaging {
         select .archive
         filter .is_archived
     );
-
-    access policy owner_only
-       allow all
-       using (global accessControl::current_user ?= .owner.id)
   }
 }

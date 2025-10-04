@@ -111,39 +111,22 @@ async def send_message(
         content=message_request.message.content
     )
 
-    # Get the talker agent
-    amprChat_agent = get_amprChat_agent()
+    # Generate AI response using the shared handler
+    if not message_request.chat_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Chat ID is required for generating responses"
+        )
 
-    # Create the context (simplified without memory components)
-    context = TalkerContext(
-        gel_client=gel_client,
-    )
-
-    # Get the agent response
-    result = await amprChat_agent.run(
-        message_request.message.content or "",
-        deps=context,
-    )
-
-    # Extract the output string from the AgentRunResult
-    response_content = result.output
-
-    # Store the assistant's response
-    await gel_client.query(
-        """
-        insert messaging::Message {
-            chat := (select assert_exists((select messaging::Chat filter .id = <uuid>$chat_id))),
-            role := 'assistant',
-            content := <str>$content,
-            created_at := datetime_current(),
-            channel := <str>$channel,
-            is_archived := false,
-        }
-        """,
+    response_context = ResponseContext(
+        message_content=message_request.message.content or "",
         chat_id=message_request.chat_id,
-        content=response_content,
-        channel="chat",  # Use same channel as user message
+        channel=channel,
+        user_id=user_id,
+        gel_client=gel_client
     )
+
+    response_content = await generate_ai_response(response_context)
 
     return {"response": response_content}
 
