@@ -18,7 +18,7 @@ import json
 
 from ..clients.gel_client import create_basic_client
 from ..queries.users.get_user_by_phone_async_edgeql import get_user_by_phone
-from ..queries.messaging.get_chat_by_phone_async_edgeql import get_chat_by_phone
+from ..queries.messaging.get_chat_by_user_async_edgeql import get_chat_by_user
 from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
 from ..api.responses import generate_ai_response, ResponseContext
 
@@ -336,10 +336,10 @@ async def _process_inbound_message(request):
 
         # Step 3: Generate AI response
         try:
-            # Get the chat ID for this phone number
-            chat_results = await get_chat_by_phone(
+            # Get the chat ID for this user
+            chat_results = await get_chat_by_user(
                 executor=gel_client,
-                phone_number=cleaned_phone
+                user_id=user_id
             )
 
             if not chat_results or len(chat_results) == 0:
