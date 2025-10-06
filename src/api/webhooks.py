@@ -155,12 +155,6 @@ def clean_phone_number(phone: str) -> str:
     # Remove ALL non-digit characters
     cleaned = ''.join(c for c in phone if c.isdigit())
 
-    # Phone numbers are stored in DB as simple digit strings with country code
-    # Example: "18472840023" (1 = US country code)
-    # If the number doesn't start with 1 (US country code), add it
-    if not cleaned.startswith('1'):
-        cleaned = '1' + cleaned
-
     # Ensure we're returning a string
     if not isinstance(cleaned, str):
         logger.error(f"clean_phone_number returned non-string type: {type(cleaned)}")
