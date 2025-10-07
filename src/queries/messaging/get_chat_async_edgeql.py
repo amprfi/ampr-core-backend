@@ -38,7 +38,7 @@ class GetChatResultRecentMessagesItem(NoPydanticValidation):
     channel: str
     content: str
     created_at: datetime.datetime | None
-    is_archived: bool | None
+    is_archived: bool
 
 
 async def get_chat(

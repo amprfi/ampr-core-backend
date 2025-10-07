@@ -54,7 +54,6 @@ async def create_message(
             channel := <str>$channel,
             content := <str>$content,
             created_at := datetime_current(),
-            is_archived := false,
         }\
         """,
         user_id=user_id,

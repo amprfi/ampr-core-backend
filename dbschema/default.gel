@@ -38,9 +38,11 @@ module messaging {
           default := datetime_current();
       };
 
-      is_archived: bool {
-          default := false;
+      required is_archived : bool {
+          default := false
       };
+
+      index on ((.chat, .created_at));
 
   }
 
@@ -51,18 +53,20 @@ module messaging {
     };
 
     # All messages including archived ones
-    multi archive: Message;
+    multi messages := .<chat[is Message];
 
     # Recent messages (not archived)
     multi recent_messages := (
-        select .archive
+        select .messages
         filter not .is_archived
+        order by .created_at desc
     );
 
-    # Historical messages (archived)
-    multi historical_messages := (
-        select .archive
+    # Earlier messages (archived)
+    multi archived_messages := (
+        select .messages
         filter .is_archived
+        order by .created_at desc
     );
   }
 }

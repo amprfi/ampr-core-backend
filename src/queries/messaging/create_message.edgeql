@@ -13,5 +13,4 @@ insert messaging::Message {
     channel := <str>$channel,
     content := <str>$content,
     created_at := datetime_current(),
-    is_archived := false,
 }
