@@ -20,6 +20,7 @@ from ..clients.gel_client import create_basic_client
 from ..queries.users.get_user_by_phone_async_edgeql import get_user_by_phone
 from ..queries.messaging.get_chat_by_user_async_edgeql import get_chat_by_user
 from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
+from ..queries.messaging.archive_messages_async_edgeql import archive_messages
 from ..api.responses import generate_ai_response, ResponseContext
 
 # Set up logging
@@ -361,6 +362,17 @@ async def _process_inbound_message(request):
             # Generate and send AI response
             await generate_ai_response(response_context)
             logger.info(f"Successfully generated and sent AI response for SMS from {from_number}")
+
+            # Archive old messages after a new message is sent by the agent
+            try:
+                await archive_messages(
+                    executor=gel_client,
+                    chat_id=chat_id
+                )
+                logger.info(f"Successfully archived old messages for chat {chat_id}")
+            except Exception as e:
+                logger.error(f"Error archiving messages for chat {chat_id}: {str(e)}", exc_info=True)
+                # Continue even if archiving fails to ensure message processing completes
 
         except Exception as e:
             logger.error(f"Error generating AI response for SMS: {str(e)}", exc_info=True)
