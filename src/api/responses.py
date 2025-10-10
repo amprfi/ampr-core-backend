@@ -14,6 +14,7 @@ import json
 from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..clients.vonage_client import VonageClient
 from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
+from ..queries.messaging.get_chat_async_edgeql import get_chat
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -70,9 +71,38 @@ async def generate_ai_response(context: ResponseContext) -> str:
             gel_client=context.gel_client,
         )
 
-        # Get the agent response
+        # Fetch unarchived messages for the current chat to provide context
+        chat_data = await get_chat(
+            executor=context.gel_client,
+            user_id=context.user_id,
+            chat_id=context.chat_id
+        )
+
+        # Prepare message history context, excluding archived messages
+        message_history = []
+        for message in chat_data.recent_messages:
+            if not message.is_archived:
+                message_history.append({
+                    "role": message.role,
+                    "content": message.content,
+                    "timestamp": message.created_at.isoformat() if message.created_at else None
+                })
+
+        # Convert to JSON string for context
+        message_history_str = json.dumps(message_history)
+
+        # Create a context string that includes both the message history and the current message
+        context_str = f"""
+        Previous conversation history (most recent first):
+        {message_history_str}
+
+        Current message to respond to:
+        {context.message_content}
+        """
+
+        # Get the agent response with enhanced context
         result = await amprChat_agent.run(
-            context.message_content or "",
+            context_str,
             deps=talker_context,
         )
 
