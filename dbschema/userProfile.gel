@@ -1,0 +1,15 @@
+module userProfile {
+
+    type Profile {
+        required user: accessControl::User;
+        required country: str;
+        required kyc_passed: bool {
+            default := false;
+        }
+    };
+
+    type WatchList {
+        required user: accessControl::User;
+    };
+    
+}
