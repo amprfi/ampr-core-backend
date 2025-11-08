@@ -69,6 +69,7 @@ async def generate_ai_response(context: ResponseContext) -> str:
         # Create the context for the agent
         talker_context = TalkerContext(
             gel_client=context.gel_client,
+            user_id=context.user_id
         )
 
         # Fetch unarchived messages for the current chat to provide context

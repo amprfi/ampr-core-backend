@@ -34,13 +34,14 @@ async def get_user_country(
     executor: gel.AsyncIOExecutor,
     *,
     user_id: uuid.UUID,
-) -> list[GetUserCountryResult]:
-    return await executor.query(
+) -> GetUserCountryResult | None:
+    return await executor.query_single(
         """\
         select userProfile::Profile {
             country
         }
-        filter .user.id = <uuid>$user_id\
+        filter .user.id = <uuid>$user_id
+        limit 1\
         """,
         user_id=user_id,
     )
