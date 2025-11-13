@@ -27,7 +27,7 @@ fast_api.include_router(auth.router, prefix="/api")
 
 fast_api.include_router(chat.router, prefix="/api")
 
-fast_api.include_router(webhooks.router)
+fast_api.include_router(webhooks.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():

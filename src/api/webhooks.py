@@ -3,11 +3,37 @@ Vonage webhook router for handling incoming SMS messages.
 
 This module provides endpoints for receiving and processing Vonage webhooks,
 including inbound messages and message status updates.
+
+Temporary Local REST Endpoint:
+---------------------------------
+For local development/testing when Vonage is unavailable, a temporary endpoint
+is available at POST /webhooks/rest-message.
+
+This endpoint:
+- Bypasses all authentication (for local use only)
+- Accepts a simplified message format:
+  {
+    "text": "message content",
+    "from_number": "sender phone number",
+    "to_number": "recipient phone number"
+  }
+- Uses the same processing pipeline as Vonage messages but with direct AI response capture
+- Returns both a success message and the generated AI response
+- Should NOT be used in production
+
+Example response format:
+{
+  "status": "success",
+  "message": "Inbound message processed",
+  "ai_response": "The generated AI response text"
+}
 """
 
 import os
 import logging
 import traceback
+import uuid
+import datetime
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, Request, HTTPException, status, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -48,6 +74,15 @@ class InboundMessagePayload(WebhookPayload):
     channel: str
     message_type: str
     conversation_id: Optional[str] = None
+
+class RestMessagePayload(BaseModel):
+    """
+    Model for temporary local REST API message payload.
+    Simplified format for direct local API communication.
+    """
+    text: str
+    from_number: str
+    to_number: str
 
 def get_vonage_api_key() -> str:
     """Get Vonage API key from environment variables"""
@@ -182,6 +217,156 @@ async def handle_inbound_message_post(
         HTTPException: If no user is found for the phone number
     """
     return await _process_inbound_message(request)
+
+@router.post("/rest-message", status_code=status.HTTP_200_OK)
+async def handle_rest_message(
+    payload: RestMessagePayload
+):
+    """
+    Temporary local REST API endpoint for direct message communication.
+    Bypasses all authentication for local development/testing.
+
+    Args:
+        payload: Message payload with simplified format
+
+    Returns:
+        dict: Response containing success status and AI response
+
+    Raises:
+        HTTPException: If processing errors occur
+    """
+    logger.warning("Using temporary local REST endpoint - no authentication")
+
+    # Create a mock request object with the expected JSON format
+    class MockRequest:
+        def __init__(self, data):
+            self._json = data
+
+        async def json(self):
+            return self._json
+
+    # Convert payload to the format expected by _process_inbound_message
+    mock_request_data = {
+        "text": payload.text,
+        "from": {"number": payload.from_number},
+        "to": {"number": payload.to_number},
+        "message_uuid": "rest-" + str(uuid.uuid4()),  # Generate a unique ID
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "channel": "rest",
+        "message_type": "text"
+    }
+
+    logger.info(f"Received local REST message: {json.dumps(mock_request_data, indent=2)}")
+
+    # Create a container to capture the AI response
+    ai_response_container = {"response": None}
+
+    # Create a custom processing function that captures the AI response
+    async def process_rest_message():
+        # Create a basic Gel client (no auth needed for system operations)
+        gel_client = create_basic_client()
+
+        # Extract and clean phone number
+        from_number = payload.from_number
+        cleaned_phone = clean_phone_number(from_number)
+        logger.info(f"Processing message from phone: {from_number}, cleaned: {cleaned_phone}")
+
+        # Step 1: Get user ID by phone number
+        try:
+            logger.debug(f"Looking up user by phone: {cleaned_phone}")
+            user_result = await get_user_by_phone(
+                executor=gel_client,
+                phone=cleaned_phone
+            )
+            user_id = user_result.id
+            logger.info(f"Found user with ID: {user_id}")
+        except Exception as e:
+            logger.error(f"No user found for phone {cleaned_phone}: {e}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error details: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No user found for phone number {cleaned_phone}"
+            )
+
+        # Step 2: Create the message in the database
+        message_content = payload.text
+        logger.info(f"Storing message for user {user_id}: {message_content}")
+
+        # The create_message function will automatically find or create a chat for the user
+        message_result = await create_message_query(
+            executor=gel_client,
+            user_id=user_id,  # Use the user ID we found
+            role="user",  # Treat as user message
+            channel="rest",  # Use rest channel
+            content=message_content  # Store just the text content
+        )
+
+        logger.info(f"Successfully stored REST message from {from_number} for user {user_id}")
+
+        # Step 3: Generate AI response
+        try:
+            # Get the chat ID for this user
+            chat_results = await get_chat_by_user(
+                executor=gel_client,
+                user_id=user_id
+            )
+
+            if not chat_results or len(chat_results) == 0:
+                logger.error(f"No chat found for phone number {cleaned_phone}")
+                raise ValueError(f"No chat found for phone number {cleaned_phone}")
+
+            chat_id = chat_results[0].id
+
+            # Create response context
+            response_context = ResponseContext(
+                message_content=message_content,
+                chat_id=chat_id,
+                channel="rest",  # Use rest channel
+                user_id=user_id,
+                gel_client=gel_client,
+                phone_number=from_number
+            )
+
+            # Generate and capture AI response
+            ai_response = await generate_ai_response(response_context)
+            ai_response_container["response"] = ai_response
+            logger.info(f"Successfully generated AI response for REST message from {from_number}")
+
+            # Archive old messages after a new message is sent by the agent
+            try:
+                await archive_messages(
+                    executor=gel_client,
+                    chat_id=chat_id
+                )
+                logger.info(f"Successfully archived old messages for chat {chat_id}")
+            except Exception as e:
+                logger.error(f"Error archiving messages for chat {chat_id}: {str(e)}", exc_info=True)
+                # Continue even if archiving fails
+
+        except Exception as e:
+            logger.error(f"Error generating AI response for REST message: {str(e)}", exc_info=True)
+            # Continue even if response generation fails
+
+        return {"status": "success", "message": "Inbound message processed"}
+
+    # Process the message and capture any exceptions
+    try:
+        await process_rest_message()
+        return {
+            "status": "success",
+            "message": "Inbound message processed",
+            "ai_response": ai_response_container["response"]
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error processing REST message: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing message: {str(e)}"
+        )
 
 @router.get("/inbound-message", status_code=status.HTTP_200_OK)
 async def handle_inbound_message_get(request: Request):
