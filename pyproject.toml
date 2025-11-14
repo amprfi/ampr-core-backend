@@ -34,3 +34,7 @@ packages = [
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"
+
+[tool.pyright]
+venvPath = "/home/cgeorgen/.cache/pypoetry/virtualenvs"
+venv = "ampr-core-backend-xqTO7KpO-py3.10"
