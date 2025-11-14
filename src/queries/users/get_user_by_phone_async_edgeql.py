@@ -31,7 +31,6 @@ class GetUserByPhoneResult(NoPydanticValidation):
     last_name: str
     email: str
     phone: str
-    country: str
 
 
 async def get_user_by_phone(
@@ -46,8 +45,7 @@ async def get_user_by_phone(
             first_name,
             last_name, 
             email,
-            phone,
-            country
+            phone
             }
         filter accessControl::User.phone = <str>$phone\
         """,

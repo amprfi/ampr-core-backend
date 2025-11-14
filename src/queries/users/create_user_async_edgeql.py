@@ -32,7 +32,6 @@ class CreateUserResult(NoPydanticValidation):
     last_name: str
     email: str
     phone: str
-    country: str
     identity: CreateUserResultIdentity
     created_at: datetime.datetime
 
@@ -49,7 +48,6 @@ async def create_user(
     last_name: str,
     email: str,
     phone: str,
-    country: str,
 ) -> CreateUserResult:
     return await executor.query_single(
         """\
@@ -59,7 +57,6 @@ async def create_user(
                 last_name := <str>$last_name,
                 email := <str>$email,
                 phone := <str>$phone,
-                country := <str>$country,
                 identity := (global ext::auth::ClientTokenIdentity)
             }
         ) {
@@ -67,7 +64,6 @@ async def create_user(
             last_name,
             email,
             phone,
-            country,
             identity,
             created_at
         };\
@@ -76,5 +72,4 @@ async def create_user(
         last_name=last_name,
         email=email,
         phone=phone,
-        country=country,
     )

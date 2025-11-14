@@ -3,7 +3,6 @@ select accessControl::User {
     first_name,
     last_name, 
     email,
-    phone,
-    country
+    phone
     }
 filter accessControl::User.phone = <str>$phone
