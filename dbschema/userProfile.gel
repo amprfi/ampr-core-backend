@@ -1,15 +1,26 @@
 module userProfile {
 
+    scalar type InvestmentHorizon extending enum<"1-5", "6-10", "10-20", "20plus">;
+    scalar type AgeGroup extending enum<"under25", "25-34", "35-44", "45-54", "55plus">;
+    scalar type InvestmentKnowledge extending enum<"novice", "intermediate", "advanced">;
+
     type Profile {
         required user: accessControl::User;
         required country: str;
         required kyc_passed: bool {
             default := false;
         }
+        investment_horizon: InvestmentHorizon;
+        age_group: AgeGroup;
+        risk_appetite: int16;
+        reason_for_investing: str;
+        multi other_investments: str;
+        investment_knowledge: InvestmentKnowledge;
+        multi financial_goals: str;
     };
 
     type WatchList {
         required user: accessControl::User;
     };
-    
+
 }

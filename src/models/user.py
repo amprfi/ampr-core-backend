@@ -1,9 +1,7 @@
 from datetime import datetime
 from typing import Optional
-
 from pydantic import BaseModel, EmailStr, Field
 from pydantic_extra_types.phone_numbers import PhoneNumber
-
 
 class UserCreate(BaseModel):
     """Model for creating a new user"""
@@ -13,7 +11,6 @@ class UserCreate(BaseModel):
     email: EmailStr
     phone: PhoneNumber
     gel_user_id: Optional[str] = Field(None, min_length=1, max_length=100)
-
 
 class UserResponse(BaseModel):
     """Model for user API responses"""
