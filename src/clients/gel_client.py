@@ -20,19 +20,6 @@ class ConstraintViolationError(GelClientError):
         super().__init__(message)
         self.status_code = status.HTTP_400_BAD_REQUEST
 
-class GelClientError(Exception):
-    """Base exception for gel client operations"""
-    pass
-
-class AuthenticationError(GelClientError):
-    """Raised when authentication fails"""
-    pass
-
-class ConstraintViolationError(GelClientError):
-    """Raised when database constraints are violated"""
-    def __init__(self, message: str):
-        super().__init__(message, status.HTTP_400_BAD_REQUEST)
-
 def create_basic_client() -> gel.AsyncIOClient:
     """
     Creates a basic unauthenticated gel client.
@@ -60,6 +47,7 @@ def create_authenticated_client(auth_token: str) -> gel.AsyncIOClient:
 
     try:
         gel_client = gel_client.with_globals({"ext::auth::client_token": auth_token})
+        assert gel_client is not None
     except Exception as e:
         raise AuthenticationError(f"Invalid authentication token: {str(e)}")
 
@@ -92,6 +80,7 @@ def create_authenticated_client_with_user(auth_token: str, user_id: str) -> gel.
             "ext::auth::client_token": auth_token,
             "accessControl::current_user": user_id
         })
+        assert gel_client is not None
     except Exception as e:
         raise AuthenticationError(f"Failed to configure client: {str(e)}")
 
@@ -119,6 +108,8 @@ if os.getenv('DEBUG', 'False').lower() == 'true':
         try:
             result = await original_query(self, query, *args, **kwargs)
             logger.debug(f"Query result: {result}")
+            if result is None:
+                raise GelClientError("Query returned None")
             return result
         except Exception as e:
             logger.error(f"Query error: {str(e)}")
@@ -130,6 +121,8 @@ if os.getenv('DEBUG', 'False').lower() == 'true':
         try:
             result = await original_query_single(self, query, *args, **kwargs)
             logger.debug(f"Query_single result: {result}")
+            if result is None:
+                raise GelClientError("Query_single returned None")
             return result
         except Exception as e:
             logger.error(f"Query_single error: {str(e)}")

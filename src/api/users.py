@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from src.clients.gel_client import ConstraintViolationError, create_basic_client
 from ..models.user import UserCreate, UserResponse, UserUpdate
-from ..models.user_profile import UserProfileCreate
+from ..models.user_profile import UserProfile
 from ..queries.memory import create_user_profile_async_edgeql as create_user_profile_qry
 from ..queries.users import create_user_async_edgeql as create_user_qry
 from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
@@ -70,13 +70,13 @@ async def post_user(user: RequestData) -> create_user_qry.CreateUserResult:
             phone=user.phone,
         )
     except ConstraintViolationError as e:
-        raise HTTPException(status_code=e.status_code, detail={"error": str(e)})
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e)})
     return created_user
 
 
 @router.post("/users/{user_id}/profile", status_code=HTTPStatus.CREATED)
 async def create_user_profile(
-    user_id: uuid.UUID, profile_data: UserProfileCreate
+    user_id: uuid.UUID, profile_data: UserProfile
 ) -> create_user_profile_qry.CreateUserProfileResult:
     """
     Create a user profile for the specified user.
@@ -96,14 +96,21 @@ async def create_user_profile(
         result = await create_user_profile_qry.create_user_profile(
             executor=client,
             userid=user_id,
-            country=profile_data.country,
-            kyc_passed=profile_data.kyc_passed,
+            country=profile_data.country or "",
+            kyc_passed=profile_data.kyc_passed or False,
+            investment_horizon=create_user_profile_qry.UserprofileInvestmentHorizon(profile_data.investment_horizon) if profile_data.investment_horizon else create_user_profile_qry.UserprofileInvestmentHorizon.E_1_5,
+            age_group=create_user_profile_qry.UserprofileAgeGroup(profile_data.age_group) if profile_data.age_group else create_user_profile_qry.UserprofileAgeGroup.UNDER25,
+            risk_appetite=profile_data.risk_appetite or 1,
+            reason_for_investing=profile_data.reason_for_investing or "",
+            other_investments=profile_data.other_investments or [],
+            investment_knowledge=create_user_profile_qry.UserprofileInvestmentKnowledge(profile_data.investment_knowledge) if profile_data.investment_knowledge else create_user_profile_qry.UserprofileInvestmentKnowledge.NOVICE,
+            financial_goals=profile_data.financial_goals or [],
         )
 
         return result
 
     except ConstraintViolationError as e:
-        raise HTTPException(status_code=e.status_code, detail={"error": str(e)})
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e)})
     except Exception as e:
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail={"error": str(e)}

@@ -4,8 +4,12 @@
 
 from __future__ import annotations
 import dataclasses
+import enum
 import gel
 import uuid
+
+
+UserprofileRiskAppetite = int
 
 
 class NoPydanticValidation:
@@ -29,22 +33,64 @@ class CreateUserProfileResult(NoPydanticValidation):
     id: uuid.UUID
 
 
+class UserprofileAgeGroup(enum.Enum):
+    UNDER25 = "under25"
+    E_25_34 = "25-34"
+    E_35_44 = "35-44"
+    E_45_54 = "45-54"
+    E_55PLUS = "55plus"
+
+
+class UserprofileInvestmentHorizon(enum.Enum):
+    E_1_5 = "1-5"
+    E_6_10 = "6-10"
+    E_10_20 = "10-20"
+    E_20PLUS = "20plus"
+
+
+class UserprofileInvestmentKnowledge(enum.Enum):
+    NOVICE = "novice"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+
 async def create_user_profile(
     executor: gel.AsyncIOExecutor,
     *,
     userid: uuid.UUID,
     country: str,
     kyc_passed: bool,
+    investment_horizon: UserprofileInvestmentHorizon,
+    age_group: UserprofileAgeGroup,
+    risk_appetite: UserprofileRiskAppetite,
+    reason_for_investing: str,
+    other_investments: list[str],
+    investment_knowledge: UserprofileInvestmentKnowledge,
+    financial_goals: list[str],
 ) -> CreateUserProfileResult:
     return await executor.query_single(
         """\
         INSERT userProfile::Profile {
             user := (SELECT accessControl::User FILTER .id = <uuid>$userid),
             country := <str>$country,
-            kyc_passed := <bool>$kyc_passed
+            kyc_passed := <bool>$kyc_passed,
+            investment_horizon := <userProfile::InvestmentHorizon>$investment_horizon,
+            age_group := <userProfile::AgeGroup>$age_group,
+            risk_appetite := <userProfile::RiskAppetite>$risk_appetite,
+            reason_for_investing := <str>$reason_for_investing,
+            other_investments := array_unpack(<array<str>>$other_investments),
+            investment_knowledge := <userProfile::InvestmentKnowledge>$investment_knowledge,
+            financial_goals := array_unpack(<array<str>>$financial_goals)
         };\
         """,
         userid=userid,
         country=country,
         kyc_passed=kyc_passed,
+        investment_horizon=investment_horizon,
+        age_group=age_group,
+        risk_appetite=risk_appetite,
+        reason_for_investing=reason_for_investing,
+        other_investments=other_investments,
+        investment_knowledge=investment_knowledge,
+        financial_goals=financial_goals,
     )
