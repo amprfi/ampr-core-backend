@@ -1,5 +1,7 @@
 module messaging {
 
+  scalar type MessageStatus extending enum<Current, PendingSummary, Archived>;
+
   type Message {
       required role: str; # "user" or "assistant"
       required channel: str; #"application", "sms", "whatsapp", or "email"
@@ -9,12 +11,24 @@ module messaging {
           default := datetime_current();
       };
 
-      required is_archived : bool {
-          default := false
+      required status: MessageStatus {
+          default := MessageStatus.Current;
       };
 
       index on ((.chat, .created_at));
+  }
 
+  type Summary {
+      required content: str;
+      required range_start: datetime;
+      required range_end: datetime;
+      required chat: Chat;
+      
+      created_at: datetime {
+          default := datetime_current();
+      };
+      
+      index on ((.chat, .created_at));
   }
 
   type Chat {
@@ -25,18 +39,28 @@ module messaging {
 
     # All messages including archived ones
     multi messages := .<chat[is Message];
+    
+    # All summaries
+    multi summaries := .<chat[is Summary];
 
-    # Recent messages (not archived)
+    # Recent messages (Current status)
     multi recent_messages := (
         select .messages
-        filter not .is_archived
+        filter .status = MessageStatus.Current
         order by .created_at desc
     );
 
-    # Earlier messages (archived)
+    # Pending Summary messages
+    multi pending_messages := (
+        select .messages
+        filter .status = MessageStatus.PendingSummary
+        order by .created_at desc
+    );
+
+    # Archived messages
     multi archived_messages := (
         select .messages
-        filter .is_archived
+        filter .status = MessageStatus.Archived
         order by .created_at desc
     );
   }
