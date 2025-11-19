@@ -5,6 +5,7 @@
 from __future__ import annotations
 import dataclasses
 import datetime
+import enum
 import gel
 import uuid
 
@@ -38,7 +39,13 @@ class GetChatResultRecentMessagesItem(NoPydanticValidation):
     channel: str
     content: str
     created_at: datetime.datetime | None
-    is_archived: bool
+    status: MessagingMessageStatus
+
+
+class MessagingMessageStatus(enum.Enum):
+    CURRENT = "Current"
+    PENDINGSUMMARY = "PendingSummary"
+    ARCHIVED = "Archived"
 
 
 async def get_chat(
@@ -60,7 +67,7 @@ async def get_chat(
                 channel,
                 content,
                 created_at,
-                is_archived
+                status
             } order by .created_at
         }\
         """,

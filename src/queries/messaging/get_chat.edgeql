@@ -9,6 +9,6 @@ select assert_exists(chat) {
         channel,
         content,
         created_at,
-        is_archived
+        status
     } order by .created_at
 }
