@@ -9,7 +9,7 @@ import json
 
 from ..clients.gel_client import create_authenticated_client, create_authenticated_client_with_user, AuthenticationError
 from ..agents.amprChat import get_amprChat_agent, TalkerContext
-from ..common.types import CommonChat, CommonMessage
+from ..utils.types import CommonChat, CommonMessage
 from ..queries.users.get_current_user_id_async_edgeql import get_current_user_id
 from ..queries.messaging.create_chat_async_edgeql import create_chat as create_chat_query
 
