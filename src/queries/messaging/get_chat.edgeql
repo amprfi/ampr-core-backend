@@ -10,5 +10,10 @@ select assert_exists(chat) {
         content,
         created_at,
         status
-    } order by .created_at
+    } order by .created_at asc,
+    summaries: {
+        content,
+        range_start,
+        range_end
+    } order by .range_start asc
 }

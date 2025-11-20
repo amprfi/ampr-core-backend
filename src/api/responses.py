@@ -1,13 +1,13 @@
 """
-Shared response handler for AI responses to both SMS and chat messages.
+Shared response handler for AI responses to chat messages.
 
 This module provides a unified interface for generating AI responses and handling
-the storage and delivery of those responses across different channels (SMS, chat).
+the storage and delivery of those responses across different channels (SMS and WhatsApp).
 """
 
 import logging
 import uuid
-from typing import Optional, Dict, Any
+from typing import Optional
 from gel import AsyncIOClient
 import json
 

@@ -30,6 +30,7 @@ class NoPydanticValidation:
 class GetChatResult(NoPydanticValidation):
     id: uuid.UUID
     recent_messages: list[GetChatResultRecentMessagesItem]
+    summaries: list[GetChatResultSummariesItem]
 
 
 @dataclasses.dataclass
@@ -40,6 +41,14 @@ class GetChatResultRecentMessagesItem(NoPydanticValidation):
     content: str
     created_at: datetime.datetime | None
     status: MessagingMessageStatus
+
+
+@dataclasses.dataclass
+class GetChatResultSummariesItem(NoPydanticValidation):
+    id: uuid.UUID
+    content: str
+    range_start: datetime.datetime
+    range_end: datetime.datetime
 
 
 class MessagingMessageStatus(enum.Enum):
@@ -68,7 +77,12 @@ async def get_chat(
                 content,
                 created_at,
                 status
-            } order by .created_at
+            } order by .created_at asc,
+            summaries: {
+                content,
+                range_start,
+                range_end
+            } order by .range_start asc
         }\
         """,
         user_id=user_id,

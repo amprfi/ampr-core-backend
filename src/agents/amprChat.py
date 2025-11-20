@@ -9,7 +9,7 @@ from pydantic_ai.agent.abstract import RunOutputDataT
 from src.queries.memory.get_user_country_async_edgeql import get_user_country
 from src.queries.memory.get_user_investment_preferences_async_edgeql import get_user_investment_preferences
 from src.models.user_profile import UserProfile
-from src.agents.preprocessing import profile_to_sentences
+from src.utils.preprocessing import profile_to_sentences
 
 logger = logging.getLogger(__name__)
 

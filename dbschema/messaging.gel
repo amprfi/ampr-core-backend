@@ -47,21 +47,18 @@ module messaging {
     multi recent_messages := (
         select .messages
         filter .status = MessageStatus.Current
-        order by .created_at desc
     );
 
     # Pending Summary messages
     multi pending_messages := (
         select .messages
         filter .status = MessageStatus.PendingSummary
-        order by .created_at desc
     );
 
     # Archived messages
     multi archived_messages := (
         select .messages
         filter .status = MessageStatus.Archived
-        order by .created_at desc
     );
   }
 }
