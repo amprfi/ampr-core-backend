@@ -7,7 +7,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from src.clients.gel_client import ConstraintViolationError, create_basic_client
-from ..models.user import UserCreate, UserResponse, UserUpdate
+from ..models.user import User, UserResponse
 from ..models.user_profile import UserProfile
 from ..queries.memory import create_user_profile_async_edgeql as create_user_profile_qry
 from ..queries.users import create_user_async_edgeql as create_user_qry
@@ -20,12 +20,6 @@ from ..queries.users import get_users_async_edgeql as get_users_qry
 router = APIRouter()
 client = create_basic_client()
 
-
-class RequestData(BaseModel):
-    email: str
-    first_name: str
-    last_name: str
-    phone: str
 
 @router.get("/users")
 async def get_users(
@@ -60,7 +54,13 @@ async def get_users(
 
 
 @router.post("/users", status_code=HTTPStatus.CREATED)
-async def post_user(user: RequestData) -> create_user_qry.CreateUserResult:
+async def post_user(user: User) -> create_user_qry.CreateUserResult:
+    if user.first_name is None or user.last_name is None or user.email is None or user.phone is None:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"error": "Missing required fields: first_name, last_name, email, phone"},
+        )
+
     try:
         created_user = await create_user_qry.create_user(
             client,
