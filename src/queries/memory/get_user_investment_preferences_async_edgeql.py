@@ -9,6 +9,9 @@ import gel
 import uuid
 
 
+UserprofileRiskAppetite = int
+
+
 class NoPydanticValidation:
     @classmethod
     def __get_pydantic_core_schema__(cls, _source_type, _handler):
@@ -28,21 +31,16 @@ class NoPydanticValidation:
 @dataclasses.dataclass
 class GetUserInvestmentPreferencesResult(NoPydanticValidation):
     id: uuid.UUID
-    investment_horizon: UserprofileInvestmentHorizon | None
-    age_group: UserprofileAgeGroup | None
-    risk_appetite: int | None
-    reason_for_investing: str | None
+    stated_investment_horizon: UserprofileInvestmentHorizon | None
+    inferred_investment_horizon: UserprofileInvestmentHorizon | None
+    stated_risk_appetite: UserprofileRiskAppetite | None
+    inferred_risk_appetite: UserprofileRiskAppetite | None
+    stated_investment_knowledge: UserprofileInvestmentKnowledge | None
+    inferred_investment_knowledge: UserprofileInvestmentKnowledge | None
+    stated_financial_goals: list[str]
+    inferred_financial_goals: list[str]
     other_investments: list[str]
-    investment_knowledge: UserprofileInvestmentKnowledge | None
-    financial_goals: list[str]
-
-
-class UserprofileAgeGroup(enum.Enum):
-    UNDER25 = "under25"
-    E_25_34 = "25-34"
-    E_35_44 = "35-44"
-    E_45_54 = "45-54"
-    E_55PLUS = "55plus"
+    inferred_investment_thesis: str | None
 
 
 class UserprofileInvestmentHorizon(enum.Enum):
@@ -66,13 +64,16 @@ async def get_user_investment_preferences(
     return await executor.query_single(
         """\
         select userProfile::Profile {
-            investment_horizon,
-            age_group,
-            risk_appetite,
-            reason_for_investing,
+            stated_investment_horizon,
+            inferred_investment_horizon,
+            stated_risk_appetite,
+            inferred_risk_appetite,
+            stated_investment_knowledge,
+            inferred_investment_knowledge,
+            stated_financial_goals,
+            inferred_financial_goals,
             other_investments,
-            investment_knowledge,
-            financial_goals
+            inferred_investment_thesis
         }
         filter .user.id = <uuid>$user_id
         limit 1\

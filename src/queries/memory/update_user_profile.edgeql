@@ -1,5 +1,6 @@
-INSERT userProfile::Profile {
-    user := (SELECT accessControl::User FILTER .id = <uuid>$userid),
+UPDATE userProfile::Profile
+FILTER .user.id = <uuid>$userid
+SET {
     country := <str>$country,
     kyc_passed := <bool>$kyc_passed,
     age_group := <userProfile::AgeGroup>$age_group,

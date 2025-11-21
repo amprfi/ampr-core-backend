@@ -14,17 +14,27 @@ module userProfile {
         required kyc_passed: bool {
             default := false;
         }
-        investment_horizon: InvestmentHorizon;
         age_group: AgeGroup;
-        risk_appetite: int16;
-        reason_for_investing: str;
+        # stated properties
+        stated_investment_horizon: InvestmentHorizon;
+        stated_risk_appetite: RiskAppetite;
+        stated_investment_knowledge: InvestmentKnowledge;
+        multi stated_financial_goals: str;
         multi other_investments: str;
-        investment_knowledge: InvestmentKnowledge;
-        multi financial_goals: str;
+
+        # inferred properties
+        inferred_investment_horizon: InvestmentHorizon;
+        inferred_risk_appetite: RiskAppetite;
+        inferred_investment_knowledge: InvestmentKnowledge;
+        multi inferred_financial_goals: str;
+
+        inferred_investment_thesis: str;
     };
 
     type WatchList {
         required user: accessControl::User;
+        multi assets: assets::asset {
+            is_inferred: bool
+        };
     };
-
 }

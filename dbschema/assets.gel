@@ -1,0 +1,13 @@
+module assets {
+
+    scalar type AssetCategory extending enum<"cryptotoken", "stock", "currency", "commodity">;
+
+    type asset {
+        ticker: str;
+        name: str;
+        required liquid: bool {
+            default := false;
+        };
+        required asset_category: AssetCategory
+    };
+}
