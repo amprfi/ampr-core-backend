@@ -59,17 +59,17 @@ async def update_user_profile(
     *,
     country: str,
     kyc_passed: bool,
-    age_group: UserprofileAgeGroup,
-    stated_investment_horizon: UserprofileInvestmentHorizon,
-    stated_risk_appetite: UserprofileRiskAppetite,
-    stated_investment_knowledge: UserprofileInvestmentKnowledge,
-    stated_financial_goals: list[str],
-    other_investments: list[str],
-    inferred_investment_horizon: UserprofileInvestmentHorizon,
-    inferred_risk_appetite: UserprofileRiskAppetite,
-    inferred_investment_knowledge: UserprofileInvestmentKnowledge,
-    inferred_financial_goals: list[str],
-    inferred_investment_thesis: str,
+    age_group: UserprofileAgeGroup | None = None,
+    stated_investment_horizon: UserprofileInvestmentHorizon | None = None,
+    stated_risk_appetite: UserprofileRiskAppetite | None = None,
+    stated_investment_knowledge: UserprofileInvestmentKnowledge | None = None,
+    stated_financial_goals: list[str] | None = None,
+    other_investments: list[str] | None = None,
+    inferred_investment_horizon: UserprofileInvestmentHorizon | None = None,
+    inferred_risk_appetite: UserprofileRiskAppetite | None = None,
+    inferred_investment_knowledge: UserprofileInvestmentKnowledge | None = None,
+    inferred_financial_goals: list[str] | None = None,
+    inferred_investment_thesis: str | None = None,
     userid: uuid.UUID,
 ) -> list[UpdateUserProfileResult]:
     return await executor.query(
@@ -77,19 +77,31 @@ async def update_user_profile(
         UPDATE userProfile::Profile
         FILTER .user.id = <uuid>$userid
         SET {
-            country := <str>$country,
-            kyc_passed := <bool>$kyc_passed,
-            age_group := <userProfile::AgeGroup>$age_group,
-            stated_investment_horizon := <userProfile::InvestmentHorizon>$stated_investment_horizon,
-            stated_risk_appetite := <userProfile::RiskAppetite>$stated_risk_appetite,
-            stated_investment_knowledge := <userProfile::InvestmentKnowledge>$stated_investment_knowledge,
-            stated_financial_goals := array_unpack(<array<str>>$stated_financial_goals),
-            other_investments := array_unpack(<array<str>>$other_investments),
-            inferred_investment_horizon := <userProfile::InvestmentHorizon>$inferred_investment_horizon,
-            inferred_risk_appetite := <userProfile::RiskAppetite>$inferred_risk_appetite,
-            inferred_investment_knowledge := <userProfile::InvestmentKnowledge>$inferred_investment_knowledge,
-            inferred_financial_goals := array_unpack(<array<str>>$inferred_financial_goals),
-            inferred_investment_thesis := <str>$inferred_investment_thesis,
+            country := <str>$country ?? .country,
+            kyc_passed := <bool>$kyc_passed ?? .kyc_passed,
+            age_group := <optional userProfile::AgeGroup>$age_group ?? .age_group,
+            stated_investment_horizon := <optional userProfile::InvestmentHorizon>$stated_investment_horizon ?? .stated_investment_horizon,
+            stated_risk_appetite := <optional userProfile::RiskAppetite>$stated_risk_appetite ?? .stated_risk_appetite,
+            stated_investment_knowledge := <optional userProfile::InvestmentKnowledge>$stated_investment_knowledge ?? .stated_investment_knowledge,
+            stated_financial_goals := (
+                array_unpack(<optional array<str>>$stated_financial_goals)
+                IF EXISTS <optional array<str>>$stated_financial_goals
+                ELSE .stated_financial_goals
+            ),
+            other_investments := (
+                array_unpack(<optional array<str>>$other_investments)
+                IF EXISTS <optional array<str>>$other_investments
+                ELSE .other_investments
+            ),
+            inferred_investment_horizon := <optional userProfile::InvestmentHorizon>$inferred_investment_horizon ?? .inferred_investment_horizon,
+            inferred_risk_appetite := <optional userProfile::RiskAppetite>$inferred_risk_appetite ?? .inferred_risk_appetite,
+            inferred_investment_knowledge := <optional userProfile::InvestmentKnowledge>$inferred_investment_knowledge ?? .inferred_investment_knowledge,
+            inferred_financial_goals := (
+                array_unpack(<optional array<str>>$inferred_financial_goals)
+                IF EXISTS <optional array<str>>$inferred_financial_goals
+                ELSE .inferred_financial_goals
+            ),
+            inferred_investment_thesis := <optional str>$inferred_investment_thesis ?? .inferred_investment_thesis,
         };\
         """,
         country=country,

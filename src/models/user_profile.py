@@ -3,12 +3,16 @@ from pydantic import BaseModel, Field, validator
 from pydantic_extra_types.country import CountryAlpha3
 
 class UserProfile(BaseModel):
-    country: Optional[CountryAlpha3]
+    country: Optional[CountryAlpha3] = None
     kyc_passed: Optional[bool] = False
-    risk_appetite: Optional[Annotated[int, Field(ge=1, le=5)]]
-    investment_horizon: Optional[Literal["1-5", "6-10", "10-20", "20plus"]]
-    age_group: Optional[Literal["under25", "25-34", "35-44", "45-54", "55plus"]]
-    reason_for_investing: Optional[str]
-    other_investments: Optional[List[str]]
-    investment_knowledge: Optional[Literal["novice", "intermediate", "advanced"]]
-    financial_goals: Optional[List[str]]
+    stated_risk_appetite: Optional[Annotated[int, Field(ge=1, le=5)]] = None
+    stated_investment_horizon: Optional[Literal["1-5", "6-10", "10-20", "20plus"]] = None
+    age_group: Optional[Literal["under25", "25-34", "35-44", "45-54", "55plus"]] = None
+    other_investments: Optional[List[str]] = None
+    stated_investment_knowledge: Optional[Literal["novice", "intermediate", "advanced"]] = None
+    stated_financial_goals: Optional[List[str]] = None
+    inferred_risk_appetite: Optional[Annotated[int, Field(ge=1, le=5)]] = None
+    inferred_investment_horizon: Optional[Literal["1-5", "6-10", "10-20", "20plus"]] = None
+    inferred_investment_knowledge: Optional[Literal["novice", "intermediate", "advanced"]] = None
+    inferred_financial_goals: Optional[List[str]] = None
+    inferred_investment_thesis: Optional[str] = None

@@ -58,13 +58,18 @@ async def user_investment_preferences(ctx: RunContext[TalkerContext]) -> List[st
         profile_data = UserProfile(
             country=None,
             kyc_passed=False,
-            investment_horizon=result.investment_horizon.value if result.investment_horizon else None,
-            age_group=result.age_group.value if result.age_group else None,
-            risk_appetite=result.risk_appetite,
-            reason_for_investing=result.reason_for_investing,
+            stated_investment_horizon=result.stated_investment_horizon.value if result.stated_investment_horizon else None,
+            stated_risk_appetite=result.stated_risk_appetite,
+            stated_investment_knowledge=result.stated_investment_knowledge.value if result.stated_investment_knowledge else None,
+            stated_financial_goals=result.stated_financial_goals,
+            
             other_investments=result.other_investments,
-            investment_knowledge=result.investment_knowledge.value if result.investment_knowledge else None,
-            financial_goals=result.financial_goals
+            
+            inferred_investment_horizon=result.inferred_investment_horizon.value if result.inferred_investment_horizon else None,
+            inferred_risk_appetite=result.inferred_risk_appetite,
+            inferred_investment_knowledge=result.inferred_investment_knowledge.value if result.inferred_investment_knowledge else None,
+            inferred_financial_goals=result.inferred_financial_goals,
+            inferred_investment_thesis=result.inferred_investment_thesis
         )
 
         sentences = profile_to_sentences(profile_data)

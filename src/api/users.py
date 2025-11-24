@@ -10,6 +10,7 @@ from src.clients.gel_client import ConstraintViolationError, create_basic_client
 from ..models.user import User, UserResponse
 from ..models.user_profile import UserProfile
 from ..queries.memory import create_user_profile_async_edgeql as create_user_profile_qry
+from ..queries.memory import update_user_profile_async_edgeql as update_user_profile_qry
 from ..queries.users import create_user_async_edgeql as create_user_qry
 from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
 from ..queries.users import get_user_by_phone_async_edgeql as get_user_by_phone_qry
@@ -93,18 +94,133 @@ async def create_user_profile(
     """
     try:
         # Create the user profile
+        stated_horizon = (
+            create_user_profile_qry.UserprofileInvestmentHorizon(
+                profile_data.stated_investment_horizon
+            )
+            if profile_data.stated_investment_horizon
+            else None
+        )
+        stated_risk = profile_data.stated_risk_appetite
+        stated_knowledge = (
+            create_user_profile_qry.UserprofileInvestmentKnowledge(
+                profile_data.stated_investment_knowledge
+            )
+            if profile_data.stated_investment_knowledge
+            else None
+        )
+        stated_goals = profile_data.stated_financial_goals or []
+
+        # Note: Inferred values are initialized as None/Blank until populated by extractor agent
+        inferred_horizon = (
+            create_user_profile_qry.UserprofileInvestmentHorizon(
+                profile_data.inferred_investment_horizon
+            )
+            if profile_data.inferred_investment_horizon
+            else None
+        )
+        inferred_risk = profile_data.inferred_risk_appetite
+        inferred_knowledge = (
+            create_user_profile_qry.UserprofileInvestmentKnowledge(
+                profile_data.inferred_investment_knowledge
+            )
+            if profile_data.inferred_investment_knowledge
+            else None
+        )
+        inferred_goals = profile_data.inferred_financial_goals or []
+        inferred_thesis = profile_data.inferred_investment_thesis or ""
+
         result = await create_user_profile_qry.create_user_profile(
             executor=client,
             userid=user_id,
             country=profile_data.country or "",
             kyc_passed=profile_data.kyc_passed or False,
-            investment_horizon=create_user_profile_qry.UserprofileInvestmentHorizon(profile_data.investment_horizon) if profile_data.investment_horizon else create_user_profile_qry.UserprofileInvestmentHorizon.E_1_5,
-            age_group=create_user_profile_qry.UserprofileAgeGroup(profile_data.age_group) if profile_data.age_group else create_user_profile_qry.UserprofileAgeGroup.UNDER25,
-            risk_appetite=profile_data.risk_appetite or 1,
-            reason_for_investing=profile_data.reason_for_investing or "",
+            age_group=create_user_profile_qry.UserprofileAgeGroup(profile_data.age_group)
+            if profile_data.age_group
+            else None,
+            stated_investment_horizon=stated_horizon,
+            stated_risk_appetite=stated_risk,
+            stated_investment_knowledge=stated_knowledge,
+            stated_financial_goals=stated_goals,
             other_investments=profile_data.other_investments or [],
-            investment_knowledge=create_user_profile_qry.UserprofileInvestmentKnowledge(profile_data.investment_knowledge) if profile_data.investment_knowledge else create_user_profile_qry.UserprofileInvestmentKnowledge.NOVICE,
-            financial_goals=profile_data.financial_goals or [],
+            inferred_investment_horizon=inferred_horizon,
+            inferred_risk_appetite=inferred_risk,
+            inferred_investment_knowledge=inferred_knowledge,
+            inferred_financial_goals=inferred_goals,
+            inferred_investment_thesis=inferred_thesis,
+        )
+
+        return result
+
+    except ConstraintViolationError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e)})
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail={"error": str(e)}
+        )
+
+@router.put("/users/{user_id}/profile")
+async def update_user_profile(
+    user_id: uuid.UUID, profile_data: UserProfile
+) -> List[update_user_profile_qry.UpdateUserProfileResult]:
+    """
+    Update a user profile for the specified user.
+    """
+    try:
+        # Update the user profile
+        stated_horizon = (
+            update_user_profile_qry.UserprofileInvestmentHorizon(
+                profile_data.stated_investment_horizon
+            )
+            if profile_data.stated_investment_horizon
+            else None
+        )
+        stated_risk = profile_data.stated_risk_appetite
+        stated_knowledge = (
+            update_user_profile_qry.UserprofileInvestmentKnowledge(
+                profile_data.stated_investment_knowledge
+            )
+            if profile_data.stated_investment_knowledge
+            else None
+        )
+        stated_goals = profile_data.stated_financial_goals or []
+
+        inferred_horizon = (
+            update_user_profile_qry.UserprofileInvestmentHorizon(
+                profile_data.inferred_investment_horizon
+            )
+            if profile_data.inferred_investment_horizon
+            else None
+        )
+        inferred_risk = profile_data.inferred_risk_appetite
+        inferred_knowledge = (
+            update_user_profile_qry.UserprofileInvestmentKnowledge(
+                profile_data.inferred_investment_knowledge
+            )
+            if profile_data.inferred_investment_knowledge
+            else None
+        )
+        inferred_goals = profile_data.inferred_financial_goals or []
+        inferred_thesis = profile_data.inferred_investment_thesis or ""
+
+        result = await update_user_profile_qry.update_user_profile(
+            executor=client,
+            userid=user_id,
+            country=profile_data.country or "",
+            kyc_passed=profile_data.kyc_passed or False,
+            age_group=update_user_profile_qry.UserprofileAgeGroup(profile_data.age_group)
+            if profile_data.age_group
+            else None,
+            stated_investment_horizon=stated_horizon,
+            stated_risk_appetite=stated_risk,
+            stated_investment_knowledge=stated_knowledge,
+            stated_financial_goals=stated_goals,
+            other_investments=profile_data.other_investments or [],
+            inferred_investment_horizon=inferred_horizon,
+            inferred_risk_appetite=inferred_risk,
+            inferred_investment_knowledge=inferred_knowledge,
+            inferred_financial_goals=inferred_goals,
+            inferred_investment_thesis=inferred_thesis,
         )
 
         return result
