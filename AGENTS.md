@@ -1,36 +1,56 @@
 # AGENTS.md - Ampr Core Backend
 
-## Build, Test & Lint Commands
-- **Install dependencies**: `poetry install`
-- **Run all tests**: `pytest`
-- **Run single test**: `pytest src/tests/test_file.py::test_function_name -v`
-- **Run dev server**: `uvicorn src.main:fast_api --reload`
+## Overview
 
-## Architecture & Structure
-- **Framework**: FastAPI (Python 3.10+)
-- **Database**: EdgeDB (instance v6.9)
-- **AI**: Pydantic-AI agents for LLM integration
-- **SMS/Chat**: Vonage for SMS, chat via API
-- **Key modules**:
-  - `src/api/`: FastAPI routers (users, auth, chat, webhooks)
-  - `src/agents/`: AI agent implementations (amprChat)
-  - `src/models/`: Pydantic models for validation
-  - `src/queries/`: EdgeDB async queries
-  - `src/clients/`: Third-party integrations (Vonage, etc.)
-  - `src/config/`: Configuration (vonage_config)
+Ampersand is a complete financial portal combining a web3 wallet, intelligent AI co-pilot, and an app store filled with financial products, strategies, and agents.
 
-## Code Style Guidelines
-- **Type hints**: Required on all function signatures. Use `from typing import ...`
-- **Imports**: Group stdlib, third-party, local. Use absolute imports from `src/`
-- **Models**: Use Pydantic BaseModel with Field validators, docstrings for classes
-- **Naming**: snake_case for functions/vars, PascalCase for classes, UPPER_CASE for constants
-- **Logging**: `logger = logging.getLogger(__name__)` per module
-- **Async/await**: All I/O uses `async def` with `await` (FastAPI, Gel, Vonage)
-- **Error handling**: Raise exceptions with context, use `logger.error(..., exc_info=True)`
-- **Docstrings**: Module-level docstrings, function docstrings with Args/Returns/Raises
+---
 
-## Dependencies
-- fastapi, uvicorn, pydantic, pydantic-ai
-- gel (EdgeDB async client), pydantic-extra-types
-- vonage, vonage-messages (SMS), resend (email)
-- httpx (HTTP client), python-dotenv, pycountry, phonenumbers
+## Core Agent Principles
+
+### 1. Question Before Concluding
+- **Ask clarifying questions** when requirements are ambiguous
+- Do not make assumptions about user intent without confirmation
+- Request specific details about:
+  - Database schema requirements
+  - API endpoint specifications
+  - Integration preferences
+  - Expected behavior and edge cases
+
+### 2. Explain Your Work
+- **Document all decisions** with clear reasoning
+- Provide step-by-step explanations for:
+  - Architecture choices
+  - Implementation approaches
+  - Code modifications
+  - Debugging strategies
+- Include comments in code explaining non-obvious logic
+- Summarize changes after completing tasks
+
+---
+
+## Technology Stack
+
+### Backend
+- **Framework**: FastAPI
+- **Language**: Python (managed via Poetry)
+- **Database**: GelDB (relational + vector storage)
+- **AI Orchestration**: Pydantic AI
+- **LLM Provider**: Mistral (primary)
+- **Communications**: Vonage (SMS & Chat APIs)
+
+### Frontend
+- **Framework**: Svelte/SvelteKit
+- **Type**: Progressive Web Application (PWA)
+
+### Infrastructure
+- **Deployment**: Railway
+- **Environment Management**: Poetry virtual environment
+
+---
+
+## Development Commands
+
+### Poetry Virtual Environment
+**CRITICAL**: All Python commands must run through Poetry:
+
