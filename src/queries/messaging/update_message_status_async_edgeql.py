@@ -21,7 +21,7 @@ async def update_message_status(
             select messaging::Message
             filter .chat.id = chat_id and .status = messaging::MessageStatus.Current
             order by .created_at desc
-            offset 24 limit 1
+            offset 19 limit 1
           )
         # Update messages older than the cutoff to PendingSummary
         select (

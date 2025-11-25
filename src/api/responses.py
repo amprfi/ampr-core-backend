@@ -13,12 +13,14 @@ import json
 
 from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
+from ..agents.extractor import get_extractor_agent, ExtractorContext
 from ..clients.vonage_client import VonageClient
 from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
 from ..queries.messaging.get_chat_async_edgeql import get_chat
 from ..queries.messaging.update_message_status_async_edgeql import update_message_status
 from ..queries.messaging.get_messages_to_summarize_async_edgeql import get_messages_to_summarize
 from ..queries.messaging.create_summary_and_archive_async_edgeql import create_summary_and_archive
+from ..queries.memory.update_user_profile_async_edgeql import update_user_profile
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -160,7 +162,7 @@ async def generate_ai_response(context: ResponseContext) -> str:
         # --- MEMORY MANAGEMENT ---
         # Trigger the background memory management process
         # We await it here, but in a production system with heavy load this might be offloaded to a background task queue
-        await _manage_chat_memory(context.gel_client, context.chat_id)
+        await _manage_chat_memory(context.gel_client, context.chat_id, context.user_id)
 
         return response_content
 
@@ -168,13 +170,14 @@ async def generate_ai_response(context: ResponseContext) -> str:
         logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
         raise
 
-async def _manage_chat_memory(gel_client: AsyncIOClient, chat_id: uuid.UUID):
+async def _manage_chat_memory(gel_client: AsyncIOClient, chat_id: uuid.UUID, user_id: uuid.UUID):
     """
     Manages the chat memory lifecycle:
     1. Updates message statuses (Current -> PendingSummary)
     2. Checks if enough PendingSummary messages exist to trigger summarization
     3. Runs summarizer agent if needed
-    4. Creates summary and archives messages
+    4. Runs extractor agent to extract user profile information
+    5. Creates summary and archives messages
     """
     try:
         # Step 1: Update message statuses and get pending count
@@ -194,7 +197,7 @@ async def _manage_chat_memory(gel_client: AsyncIOClient, chat_id: uuid.UUID):
         logger.info(f"Memory Management: Chat {chat_id} has {pending_count} pending messages.")
 
         # Step 2: Trigger Summarization if threshold met
-        if pending_count >= 25:
+        if pending_count >= 20:
             logger.info(f"Triggering summarization for chat {chat_id}")
             
             # Fetch the messages to summarize
@@ -240,6 +243,44 @@ async def _manage_chat_memory(gel_client: AsyncIOClient, chat_id: uuid.UUID):
             
             summary_content = summary_result.output
             logger.info(f"Generated summary for chat {chat_id}: {summary_content[:50]}...")
+            
+            # Run Extractor Agent
+            extractor_agent = get_extractor_agent()
+            extractor_ctx = ExtractorContext(
+                gel_client=gel_client,
+                user_id=user_id
+            )
+            
+            extraction_result = await extractor_agent.run(
+                f"Extract user profile information from these messages:\n\n{conversation_text}",
+                deps=extractor_ctx
+            )
+            
+            extracted_profile = extraction_result.output
+            logger.info(f"Extracted profile data for user {user_id}")
+            
+            # Update user profile if any non-null values were extracted
+            has_updates = any([
+                extracted_profile.inferred_investment_horizon is not None,
+                extracted_profile.inferred_risk_appetite is not None,
+                extracted_profile.inferred_investment_knowledge is not None,
+                extracted_profile.inferred_financial_goals is not None,
+                extracted_profile.inferred_investment_thesis is not None
+            ])
+            
+            if has_updates:
+                await update_user_profile(
+                    executor=gel_client,
+                    userid=user_id,
+                    inferred_investment_horizon=extracted_profile.inferred_investment_horizon,
+                    inferred_risk_appetite=extracted_profile.inferred_risk_appetite,
+                    inferred_investment_knowledge=extracted_profile.inferred_investment_knowledge,
+                    inferred_financial_goals=extracted_profile.inferred_financial_goals,
+                    inferred_investment_thesis=extracted_profile.inferred_investment_thesis
+                )
+                logger.info(f"Updated user profile for user {user_id} with extracted data")
+            else:
+                logger.info(f"No profile updates extracted for user {user_id}")
             
             # Save Summary and Archive Messages
             await create_summary_and_archive(

@@ -50,7 +50,7 @@ async def get_messages_to_summarize(
           .chat.id = <uuid>$chat_id
           and .status = messaging::MessageStatus.PendingSummary
         order by .created_at asc
-        limit 25\
+        limit 20\
         """,
         chat_id=chat_id,
     )
