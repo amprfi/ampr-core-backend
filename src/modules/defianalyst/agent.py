@@ -57,13 +57,16 @@ async def get_coin_price_and_market_data(
         coin_name = data.get("name", coin_id)
         coin_symbol = data.get("symbol", "").upper()
         
-        result = f"{coin_name} ({coin_symbol}):\n"
-        result += f"Price: ${price_usd:,.2f}\n" if isinstance(price_usd, (int, float)) else f"Price: {price_usd}\n"
-        result += f"Market Cap: ${mcap_usd:,.0f}\n" if isinstance(mcap_usd, (int, float)) else f"Market Cap: {mcap_usd}\n"
-        result += f"24h Volume: ${volume_usd:,.0f}" if isinstance(volume_usd, (int, float)) else f"24h Volume: {volume_usd}"
+        price_str = f"${price_usd:,.2f}" if isinstance(price_usd, (int, float)) else str(price_usd)
+        mcap_str = f"${mcap_usd:,.0f}" if isinstance(mcap_usd, (int, float)) else str(mcap_usd)
+        volume_str = f"${volume_usd:,.0f}" if isinstance(volume_usd, (int, float)) else str(volume_usd)
+        
+        result = f"{coin_name} ({coin_symbol}) is trading at {price_str} with a market cap of {mcap_str} and 24h volume of {volume_str}"
         
         if date:
-            result += f"\n(Data from {date})"
+            result += f" (data from {date})"
+        else:
+            result += "."
         
         logger.info(f"Tool result: Successfully retrieved data for {coin_id}")
         return result
@@ -131,9 +134,9 @@ async def search_coin_by_name_or_symbol(
             return f"No coins found matching '{query}'"
         
         # Display top 5 results
-        result = f"Found {len(matches)} match(es):\n"
-        for coin in matches[:5]:
-            result += f"- {coin.get('name')} ({coin.get('symbol', '').upper()}): ID = {coin.get('id')}\n"
+        result = f"Found {len(matches)} match(es): "
+        coin_strs = [f"{coin.get('name')} ({coin.get('symbol', '').upper()}) with ID {coin.get('id')}" for coin in matches[:5]]
+        result += ", ".join(coin_strs) + "."
         
         logger.info(f"Tool result: Found {len(exact_matches)} exact + {len(partial_matches)} partial matches for '{query}'")
         return result
@@ -157,10 +160,11 @@ CAPABILITIES:
 IMPORTANT GUIDELINES:
 1. Use search_coin_by_name_or_symbol first if you're unsure of the exact coin ID
 2. Common coin IDs: bitcoin, ethereum, solana, cardano, polkadot, avalanche-2, etc.
-3. Always provide data in clear, formatted responses with proper currency formatting
+3. Always provide data in clear, responses with proper currency formatting
 4. If data is unavailable or an error occurs, clearly state the issue
 5. Keep responses concise and data-focused
 6. Do not provide investment advice or speculation about future prices
+7. Use plain text only - no Markdown formatting (**, *, _, etc.), no bullet points, no headers
 
 When answering questions, focus solely on providing the requested market data.
 """
