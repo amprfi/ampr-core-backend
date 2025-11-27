@@ -145,7 +145,7 @@ async def generate_ai_response(context: ResponseContext) -> str:
         A specialized module has processed this request and returned the following response:
         {module_response}
 
-        IMPORTANT: Present the module's response to the user without materially modifying it. You may add brief context or formatting, but do not change the factual content or add speculation.
+        IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.
         """
         else:
             context_str = f"""

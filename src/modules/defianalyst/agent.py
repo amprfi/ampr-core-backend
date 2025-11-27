@@ -95,24 +95,39 @@ async def search_coin_by_name_or_symbol(
         coins_list = await ctx.deps.coingecko_client.get_coins_list()
         
         query_lower = query.lower()
-        matches = []
+        exact_matches = []
+        partial_matches = []
         
         for coin in coins_list:
-            if (query_lower in coin.get("id", "").lower() or 
-                query_lower in coin.get("symbol", "").lower() or 
-                query_lower in coin.get("name", "").lower()):
-                matches.append(coin)
-                if len(matches) >= 10:
+            coin_id = coin.get("id", "").lower()
+            coin_symbol = coin.get("symbol", "").lower()
+            coin_name = coin.get("name", "").lower()
+            
+            # Prioritize exact matches
+            if (query_lower == coin_id or 
+                query_lower == coin_symbol or 
+                query_lower == coin_name):
+                exact_matches.append(coin)
+            # Then collect partial matches
+            elif (query_lower in coin_id or 
+                  query_lower in coin_symbol or 
+                  query_lower in coin_name):
+                partial_matches.append(coin)
+                if len(partial_matches) >= 20:
                     break
+        
+        # Combine results: exact matches first, then partials
+        matches = exact_matches + partial_matches
         
         if not matches:
             return f"No coins found matching '{query}'"
         
+        # Display top 5 results
         result = f"Found {len(matches)} match(es):\n"
         for coin in matches[:5]:
             result += f"- {coin.get('name')} ({coin.get('symbol', '').upper()}): ID = {coin.get('id')}\n"
         
-        logger.info(f"Tool result: Found {len(matches)} matches for '{query}'")
+        logger.info(f"Tool result: Found {len(exact_matches)} exact + {len(partial_matches)} partial matches for '{query}'")
         return result
         
     except Exception as e:
