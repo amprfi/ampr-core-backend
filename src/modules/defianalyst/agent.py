@@ -94,7 +94,10 @@ async def search_coin_by_name_or_symbol(
     try:
         coins_list = await ctx.deps.coingecko_client.get_coins_list()
         
-        query_lower = query.lower()
+        # Split query on common separators to handle formats like "Scroll, SCR" or "BTC/Bitcoin"
+        import re
+        query_terms = [term.strip().lower() for term in re.split(r'[,/\s]+', query) if term.strip()]
+        
         exact_matches = []
         partial_matches = []
         
@@ -103,18 +106,23 @@ async def search_coin_by_name_or_symbol(
             coin_symbol = coin.get("symbol", "").lower()
             coin_name = coin.get("name", "").lower()
             
-            # Prioritize exact matches
-            if (query_lower == coin_id or 
-                query_lower == coin_symbol or 
-                query_lower == coin_name):
-                exact_matches.append(coin)
-            # Then collect partial matches
-            elif (query_lower in coin_id or 
-                  query_lower in coin_symbol or 
-                  query_lower in coin_name):
-                partial_matches.append(coin)
-                if len(partial_matches) >= 20:
+            # Check if any query term matches
+            for query_term in query_terms:
+                # Prioritize exact matches
+                if (query_term == coin_id or 
+                    query_term == coin_symbol or 
+                    query_term == coin_name):
+                    if coin not in exact_matches:
+                        exact_matches.append(coin)
                     break
+                # Then collect partial matches
+                elif (query_term in coin_id or 
+                      query_term in coin_symbol or 
+                      query_term in coin_name):
+                    if coin not in partial_matches and coin not in exact_matches:
+                        partial_matches.append(coin)
+                    if len(partial_matches) >= 20:
+                        break
         
         # Combine results: exact matches first, then partials
         matches = exact_matches + partial_matches
