@@ -15,6 +15,7 @@ from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
 from ..clients.vonage_client import VonageClient
+from ..modules.registry import get_module_registry
 from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
 from ..queries.messaging.get_chat_async_edgeql import get_chat
 from ..queries.messaging.update_message_status_async_edgeql import update_message_status
@@ -69,6 +70,21 @@ async def generate_ai_response(context: ResponseContext) -> str:
     try:
         logger.info(f"Generating AI response for {context.channel} message in chat {context.chat_id}")
 
+        # Check for module triggers
+        module_registry = get_module_registry()
+        module_name = module_registry.detect_module_trigger(context.message_content)
+        module_response = None
+        
+        if module_name:
+            logger.info(f"Module '{module_name}' detected, invoking module")
+            try:
+                module_response = await module_registry.invoke_module(module_name, context.message_content)
+                logger.info(f"Module '{module_name}' returned response")
+            except Exception as e:
+                error_msg = f"Module '{module_name}' failed: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                module_response = f"ERROR: {error_msg}"
+
         # Get the talker agent
         amprChat_agent = get_amprChat_agent()
 
@@ -111,7 +127,28 @@ async def generate_ai_response(context: ResponseContext) -> str:
         message_history_str = json.dumps(message_history)
 
         # Create a context string that includes summaries, message history and the current message
-        context_str = f"""
+        if module_response:
+            context_str = f"""
+        [LONG TERM MEMORY / SUMMARIES]
+        The following are summaries of earlier conversation parts (chronological order):
+        {summaries_str}
+
+        [RECENT CONVERSATION]
+        Previous conversation history (chronological order):
+        {message_history_str}
+
+        [CURRENT MESSAGE]
+        User message:
+        {context.message_content}
+
+        [MODULE RESPONSE]
+        A specialized module has processed this request and returned the following response:
+        {module_response}
+
+        IMPORTANT: Present the module's response to the user without materially modifying it. You may add brief context or formatting, but do not change the factual content or add speculation.
+        """
+        else:
+            context_str = f"""
         [LONG TERM MEMORY / SUMMARIES]
         The following are summaries of earlier conversation parts (chronological order):
         {summaries_str}

@@ -1,0 +1,9 @@
+# Third-Party Module Configuration
+# Defines modules that can be invoked via @mention syntax
+
+modules:
+  - name: "defianalyst"
+    trigger: "@defianalyst"
+    path: "src.modules.defianalyst"
+    enabled: true
+    description: "Cryptocurrency market data analyst powered by CoinGecko API"

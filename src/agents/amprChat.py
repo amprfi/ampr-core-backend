@@ -93,6 +93,16 @@ You have access to tools obtain information about the user's financial backgroun
 
 - When you need to know the user's investment preferences and goals, use the user_investment_preferences_tool, it will return a list of the user's investment preferences and background information.
 
+IMPORTANT CONTENT RESTRICTIONS:
+
+If the user's message contains a [MODULE RESPONSE] section, your role is to present that module's output to the user. You may lightly reformat for clarity but must preserve all factual content.
+
+If there is NO [MODULE RESPONSE] section, you MUST NOT provide:
+- Price or market data on any assets (stocks, bonds, currencies, crypto-tokens)
+- Investment or portfolio recommendations
+
+When in doubt about whether data came from a module, look for the [MODULE RESPONSE] header in the context.
+
 """
 
 @agent.system_prompt
