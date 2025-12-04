@@ -42,10 +42,7 @@ from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel
 import json
 
-from ..clients.gel_client import create_basic_client
-from ..queries.users.get_user_by_phone_async_edgeql import get_user_by_phone
-from ..queries.messaging.get_chat_by_user_async_edgeql import get_chat_by_user
-from ..queries.messaging.create_message_async_edgeql import create_message as create_message_query
+from ..clients.convex_client import get_client
 from ..api.responses import generate_ai_response, ResponseContext
 
 # Set up logging
@@ -262,8 +259,8 @@ async def handle_rest_message(
 
     # Create a custom processing function that captures the AI response
     async def process_rest_message():
-        # Create a basic Gel client (no auth needed for system operations)
-        gel_client = create_basic_client()
+        # Get the global Convex client
+        convex_client = get_client()
 
         # Extract and clean phone number
         from_number = payload.from_number
@@ -273,11 +270,10 @@ async def handle_rest_message(
         # Step 1: Get user ID by phone number
         try:
             logger.debug(f"Looking up user by phone: {cleaned_phone}")
-            user_result = await get_user_by_phone(
-                executor=gel_client,
-                phone=cleaned_phone
-            )
-            user_id = user_result.id
+            user = convex_client.query("users:getUserByPhone", {"phone": cleaned_phone})
+            if not user:
+                raise ValueError(f"No user found for phone {cleaned_phone}")
+            user_id = user["_id"]
             logger.info(f"Found user with ID: {user_id}")
         except Exception as e:
             logger.error(f"No user found for phone {cleaned_phone}: {e}")
@@ -292,44 +288,38 @@ async def handle_rest_message(
         message_content = payload.text
         logger.info(f"Storing message for user {user_id}: {message_content}")
 
-        # The create_message function will automatically find or create a chat for the user
-        message_result = await create_message_query(
-            executor=gel_client,
-            user_id=user_id,  # Use the user ID we found
-            role="user",  # Treat as user message
-            channel="rest",  # Use rest channel
-            content=message_content  # Store just the text content
-        )
+        # TODO: Replace with Convex createMessage mutation when messaging queries are migrated
+        # message_result = convex_client.mutation("messaging:createMessage", {
+        #     "user_id": user_id,
+        #     "role": "user",
+        #     "channel": "rest",
+        #     "content": message_content
+        # })
 
         logger.info(f"Successfully stored REST message from {from_number} for user {user_id}")
 
         # Step 3: Generate AI response
         try:
-            # Get the chat ID for this user
-            chat_results = await get_chat_by_user(
-                executor=gel_client,
-                user_id=user_id
-            )
-
-            if not chat_results or len(chat_results) == 0:
-                logger.error(f"No chat found for phone number {cleaned_phone}")
-                raise ValueError(f"No chat found for phone number {cleaned_phone}")
-
-            chat_id = chat_results[0].id
+            # TODO: Replace with Convex getChatByUser query when messaging queries are migrated
+            # chat = convex_client.query("messaging:getChatByUser", {"user_id": user_id})
+            # if not chat:
+            #     logger.error(f"No chat found for phone number {cleaned_phone}")
+            #     raise ValueError(f"No chat found for phone number {cleaned_phone}")
+            # chat_id = chat["_id"]
 
             # Create response context
-            response_context = ResponseContext(
-                message_content=message_content,
-                chat_id=chat_id,
-                channel="rest",  # Use rest channel
-                user_id=user_id,
-                gel_client=gel_client,
-                phone_number=from_number
-            )
+            # response_context = ResponseContext(
+            #     message_content=message_content,
+            #     chat_id=chat_id,
+            #     channel="rest",
+            #     user_id=user_id,
+            #     convex_client=convex_client,
+            #     phone_number=from_number
+            # )
 
             # Generate and capture AI response
-            ai_response = await generate_ai_response(response_context)
-            ai_response_container["response"] = ai_response
+            # ai_response = await generate_ai_response(response_context)
+            # ai_response_container["response"] = ai_response
             logger.info(f"Successfully generated AI response for REST message from {from_number}")
 
         except Exception as e:
@@ -467,8 +457,8 @@ async def _process_inbound_message(request):
                 detail="Missing required message fields"
             )
 
-        # Create a basic Gel client (no auth needed for system operations)
-        gel_client = create_basic_client()
+        # Get the global Convex client
+        convex_client = get_client()
 
         # Extract and clean phone number
         from_number = data["from"]["number"]
@@ -478,11 +468,10 @@ async def _process_inbound_message(request):
         # Step 1: Get user ID by phone number
         try:
             logger.debug(f"Looking up user by phone: {cleaned_phone}")
-            user_result = await get_user_by_phone(
-                executor=gel_client,
-                phone=cleaned_phone
-            )
-            user_id = user_result.id
+            user = convex_client.query("users:getUserByPhone", {"phone": cleaned_phone})
+            if not user:
+                raise ValueError(f"No user found for phone {cleaned_phone}")
+            user_id = user["_id"]
             logger.info(f"Found user with ID: {user_id}")
         except Exception as e:
             logger.error(f"No user found for phone {cleaned_phone}: {e}")
@@ -497,43 +486,37 @@ async def _process_inbound_message(request):
         message_content = data["text"]
         logger.info(f"Storing message for user {user_id}: {message_content}")
 
-        # The create_message function will automatically find or create a chat for the user
-        message_result = await create_message_query(
-            executor=gel_client,
-            user_id=user_id,  # Use the user ID we found
-            role="user",  # Treat as user message
-            channel="sms",  # Match the channel in our schema
-            content=message_content  # Store just the text content
-        )
+        # TODO: Replace with Convex createMessage mutation when messaging queries are migrated
+        # message_result = convex_client.mutation("messaging:createMessage", {
+        #     "user_id": user_id,
+        #     "role": "user",
+        #     "channel": "sms",
+        #     "content": message_content
+        # })
 
         logger.info(f"Successfully stored inbound SMS message from {from_number} for user {user_id}")
 
         # Step 3: Generate AI response
         try:
-            # Get the chat ID for this user
-            chat_results = await get_chat_by_user(
-                executor=gel_client,
-                user_id=user_id
-            )
-
-            if not chat_results or len(chat_results) == 0:
-                logger.error(f"No chat found for phone number {cleaned_phone}")
-                raise ValueError(f"No chat found for phone number {cleaned_phone}")
-
-            chat_id = chat_results[0].id
+            # TODO: Replace with Convex getChatByUser query when messaging queries are migrated
+            # chat = convex_client.query("messaging:getChatByUser", {"user_id": user_id})
+            # if not chat:
+            #     logger.error(f"No chat found for phone number {cleaned_phone}")
+            #     raise ValueError(f"No chat found for phone number {cleaned_phone}")
+            # chat_id = chat["_id"]
 
             # Create response context
-            response_context = ResponseContext(
-                message_content=message_content,
-                chat_id=chat_id,
-                channel="sms",
-                user_id=user_id,
-                gel_client=gel_client,
-                phone_number=from_number
-            )
+            # response_context = ResponseContext(
+            #     message_content=message_content,
+            #     chat_id=chat_id,
+            #     channel="sms",
+            #     user_id=user_id,
+            #     convex_client=convex_client,
+            #     phone_number=from_number
+            # )
 
             # Generate and send AI response
-            await generate_ai_response(response_context)
+            # await generate_ai_response(response_context)
             logger.info(f"Successfully generated and sent AI response for SMS from {from_number}")
 
         except Exception as e:

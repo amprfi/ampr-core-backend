@@ -3,59 +3,71 @@ from __future__ import annotations
 import datetime
 import uuid
 from http import HTTPStatus
-from typing import List
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from convex import ConvexError
+from src.clients.convex_client import get_client
 from src.clients.gel_client import ConstraintViolationError, create_basic_client
 from ..models.user import User, UserResponse
 from ..models.user_profile import UserProfile
 from ..queries.memory import create_user_profile_async_edgeql as create_user_profile_qry
 from ..queries.memory import update_user_profile_async_edgeql as update_user_profile_qry
-from ..queries.users import create_user_async_edgeql as create_user_qry
-from ..queries.users import get_user_by_email_async_edgeql as get_user_by_email_qry
-from ..queries.users import get_user_by_phone_async_edgeql as get_user_by_phone_qry
-from ..queries.users import get_users_async_edgeql as get_users_qry
 
 # ---------------------------------------------------------------- #
 
 router = APIRouter()
-client = create_basic_client()
+client = get_client()
+gel_client = create_basic_client()  # For profile queries that haven't been migrated yet
 
 
 @router.get("/users")
-async def get_users(
+async def get_user(
     email: str = Query(None, max_length=50), phone: str = Query(None, max_length=20)
-) -> (
-    List[get_users_qry.GetUsersResult]
-    | get_user_by_email_qry.GetUserByEmailResult
-    | get_user_by_phone_qry.GetUserByPhoneResult
-):
+) -> Dict[str, Any]:
+    # Require exactly one parameter
+    if email and phone:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"error": "Provide either email or phone, not both"},
+        )
+    
+    if not email and not phone:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"error": "Must provide either email or phone parameter"},
+        )
+    
     if email:
-        user = await get_user_by_email_qry.get_user_by_email(client, email=email)
+        user = client.query("users:getUserByEmail", {"email": email})
         if not user:
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
-                detail={"error": f"Username '{email}' does not exist."},
+                detail={"error": f"User with email '{email}' does not exist."},
             )
         return user
-    elif phone:
-        user = await get_user_by_phone_qry.get_user_by_phone(client, phone=phone)
-        if not user:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail={"error": f"User with phone '{phone}' does not exist."},
-            )
-        return user
-    else:
-        users = await get_users_qry.get_users(client)
-        return users
+    
+    # Must be phone at this point
+    user = client.query("users:getUserByPhone", {"phone": phone})
+    if not user:
+        raise HTTPException(
+            status_code=HTTPStatus.NOT_FOUND,
+            detail={"error": f"User with phone '{phone}' does not exist."},
+        )
+    return user
+
+
+@router.get("/users/all")
+async def get_all_users() -> List[Dict[str, Any]]:
+    users = client.query("users:getUsers", {})
+    return users
 
 
 ...
 
 
 @router.post("/users", status_code=HTTPStatus.CREATED)
-async def post_user(user: User) -> create_user_qry.CreateUserResult:
+async def post_user(user: User) -> Dict[str, Any]:
     if user.first_name is None or user.last_name is None or user.email is None or user.phone is None:
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
@@ -63,15 +75,14 @@ async def post_user(user: User) -> create_user_qry.CreateUserResult:
         )
 
     try:
-        created_user = await create_user_qry.create_user(
-            client,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            email=user.email,
-            phone=user.phone,
-        )
-    except ConstraintViolationError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e)})
+        created_user = client.mutation("users:createUser", {
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "phone": user.phone,
+        })
+    except ConvexError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e.data)})
     return created_user
 
 
@@ -131,7 +142,7 @@ async def create_user_profile(
         inferred_thesis = profile_data.inferred_investment_thesis or ""
 
         result = await create_user_profile_qry.create_user_profile(
-            executor=client,
+            executor=gel_client,
             userid=user_id,
             country=profile_data.country or "",
             kyc_passed=profile_data.kyc_passed or False,
@@ -204,7 +215,7 @@ async def update_user_profile(
         inferred_thesis = profile_data.inferred_investment_thesis or ""
 
         result = await update_user_profile_qry.update_user_profile(
-            executor=client,
+            executor=gel_client,
             userid=user_id,
             country=profile_data.country or "",
             kyc_passed=profile_data.kyc_passed or False,
