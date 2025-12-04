@@ -3,3 +3,8 @@ __pycache__
 .venv
 .env
 .gel.local.toml
+.env.local
+
+# Convex
+node_modules/
+convex/_generated/
