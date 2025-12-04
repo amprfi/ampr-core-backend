@@ -1,4 +1,3 @@
-using extension auth;
 global accessControl::current_user: uuid;
 
 module accessControl {
@@ -19,9 +18,6 @@ module accessControl {
     required created_at: datetime {
       readonly := true;
       default := datetime_current();
-    };
-    required identity: ext::auth::Identity {
-      constraint exclusive;
     };
   }
 }

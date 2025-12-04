@@ -23,68 +23,9 @@ class ConstraintViolationError(GelClientError):
 def create_basic_client() -> gel.AsyncIOClient:
     """
     Creates a basic unauthenticated gel client.
-    Used for public operations and initial auth flows.
+    Used for webhook processing and system operations.
     """
     return gel.create_async_client()
-
-def create_authenticated_client(auth_token: str) -> gel.AsyncIOClient:
-    """
-    Creates an authenticated gel client with the provided auth token.
-
-    Args:
-        auth_token: The authentication token to use for client configuration
-
-    Returns:
-        A configured gel.AsyncIOClient with authentication
-
-    Raises:
-        AuthenticationError: If the authentication token is invalid or configuration fails
-    """
-    if not auth_token:
-        raise AuthenticationError("Authentication required. Please log in first.")
-
-    gel_client = gel.create_async_client()
-
-    try:
-        gel_client = gel_client.with_globals({"ext::auth::client_token": auth_token})
-        assert gel_client is not None
-    except Exception as e:
-        raise AuthenticationError(f"Invalid authentication token: {str(e)}")
-
-    return gel_client
-
-def create_authenticated_client_with_user(auth_token: str, user_id: str) -> gel.AsyncIOClient:
-    """
-    Creates an authenticated gel client with both auth token and user context.
-
-    Args:
-        auth_token: The authentication token to use for client configuration
-        user_id: The user ID to set as the current user in the client
-
-    Returns:
-        A configured gel.AsyncIOClient with both authentication and user context
-
-    Raises:
-        AuthenticationError: If the authentication token is invalid or configuration fails
-    """
-    if not auth_token:
-        raise AuthenticationError("Authentication required. Please log in first.")
-
-    if not user_id:
-        raise AuthenticationError("User ID is required for user context.")
-
-    gel_client = gel.create_async_client()
-
-    try:
-        gel_client = gel_client.with_globals({
-            "ext::auth::client_token": auth_token,
-            "accessControl::current_user": user_id
-        })
-        assert gel_client is not None
-    except Exception as e:
-        raise AuthenticationError(f"Failed to configure client: {str(e)}")
-
-    return gel_client
 
 # Configure logging
 logger = logging.getLogger(__name__)

@@ -32,13 +32,7 @@ class CreateUserResult(NoPydanticValidation):
     last_name: str
     email: str
     phone: str
-    identity: CreateUserResultIdentity
     created_at: datetime.datetime
-
-
-@dataclasses.dataclass
-class CreateUserResultIdentity(NoPydanticValidation):
-    id: uuid.UUID
 
 
 async def create_user(
@@ -57,14 +51,12 @@ async def create_user(
                 last_name := <str>$last_name,
                 email := <str>$email,
                 phone := <str>$phone,
-                identity := (global ext::auth::ClientTokenIdentity)
             }
         ) {
             first_name,
             last_name,
             email,
             phone,
-            identity,
             created_at
         };\
         """,
