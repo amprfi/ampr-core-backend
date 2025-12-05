@@ -112,16 +112,46 @@ class CoinGeckoClient:
     
     async def get_current_price(self, coin_id: str) -> Dict[str, Any]:
         """
-        Get current price and market data for a coin (uses today's date).
+        Get current live price and market data for a coin.
         
         Args:
             coin_id: CoinGecko coin ID (e.g., "bitcoin", "ethereum")
             
         Returns:
-            Dictionary containing current market data
+            Dictionary containing current market data in /coins/{id} format
+            
+        Raises:
+            httpx.HTTPStatusError: If the API returns an error status
+            Exception: For other failures
         """
-        today = datetime.now().strftime("%d-%m-%Y")
-        return await self.get_coin_history(coin_id, today)
+        try:
+            params = {
+                "localization": "false",
+                "tickers": "false",
+                "market_data": "true",
+                "community_data": "false",
+                "developer_data": "false",
+                "sparkline": "false"
+            }
+            
+            logger.info(f"Fetching current price for {coin_id}")
+            
+            response = await self.client.get(
+                f"/coins/{coin_id}",
+                params=params
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            logger.info(f"Successfully fetched current price for {coin_id}")
+            return data
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"CoinGecko API error: {e.response.status_code} - {e.response.text}")
+            raise Exception(f"Failed to fetch current price: {e.response.status_code}")
+        except Exception as e:
+            logger.error(f"Error fetching current price: {str(e)}")
+            raise
     
     async def close(self):
         """Close the HTTP client connection."""

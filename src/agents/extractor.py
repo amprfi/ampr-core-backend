@@ -1,25 +1,18 @@
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
-from gel import AsyncIOClient
-import uuid
+from convex import ConvexClient
 import logging
-
-from src.queries.memory.get_user_investment_preferences_async_edgeql import get_user_investment_preferences
-from src.queries.memory.update_user_profile_async_edgeql import (
-    UserprofileInvestmentHorizon,
-    UserprofileInvestmentKnowledge
-)
 
 logger = logging.getLogger(__name__)
 
 class ExtractorContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    gel_client: AsyncIOClient
-    user_id: uuid.UUID
+    convex_client: ConvexClient
+    user_id: str
 
 class ExtractedProfile(BaseModel):
-    inferred_investment_horizon: Optional[UserprofileInvestmentHorizon] = Field(
+    inferred_investment_horizon: Optional[str] = Field(
         None,
         description="Investment timeframe: E_1_5 (short-term), E_6_10 (medium-term), E_10_20 (long-term), or E_20PLUS (very long-term)"
     )
@@ -29,7 +22,7 @@ class ExtractedProfile(BaseModel):
         le=5,
         description="Risk tolerance from 1 (very conservative) to 5 (very aggressive)"
     )
-    inferred_investment_knowledge: Optional[UserprofileInvestmentKnowledge] = Field(
+    inferred_investment_knowledge: Optional[str] = Field(
         None,
         description="Investment expertise: NOVICE, INTERMEDIATE, or ADVANCED"
     )

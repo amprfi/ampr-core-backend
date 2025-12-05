@@ -174,25 +174,28 @@ async def get_webhook_credentials(
             detail=f"Authentication failed: {str(e)}"
         )
 
-def clean_phone_number(phone: str) -> str:
+def normalize_phone_number(phone: str) -> str:
     """
-    Clean and normalize a phone number for lookup.
+    Normalize a phone number to consistent storage/lookup format.
+    
+    Removes all non-digit characters (tel:, +, -, spaces, etc.)
+    Returns digits only with country code.
 
     Args:
-        phone: The phone number to clean
+        phone: The phone number to normalize
 
     Returns:
-        str: Cleaned phone number in format expected by database (digits only with country code)
+        str: Normalized phone number (digits only)
     """
     # Remove ALL non-digit characters
-    cleaned = ''.join(c for c in phone if c.isdigit())
+    normalized = ''.join(c for c in phone if c.isdigit())
 
     # Ensure we're returning a string
-    if not isinstance(cleaned, str):
-        logger.error(f"clean_phone_number returned non-string type: {type(cleaned)}")
-        raise ValueError(f"Expected string but got {type(cleaned)}")
+    if not isinstance(normalized, str):
+        logger.error(f"normalize_phone_number returned non-string type: {type(normalized)}")
+        raise ValueError(f"Expected string but got {type(normalized)}")
 
-    return cleaned
+    return normalized
 
 @router.post("/inbound-message", status_code=status.HTTP_200_OK)
 async def handle_inbound_message_post(
@@ -262,64 +265,62 @@ async def handle_rest_message(
         # Get the global Convex client
         convex_client = get_client()
 
-        # Extract and clean phone number
+        # Extract and normalize phone number
         from_number = payload.from_number
-        cleaned_phone = clean_phone_number(from_number)
-        logger.info(f"Processing message from phone: {from_number}, cleaned: {cleaned_phone}")
+        normalized_phone = normalize_phone_number(from_number)
+        logger.info(f"Processing message from phone: {from_number}, normalized: {normalized_phone}")
 
         # Step 1: Get user ID by phone number
         try:
-            logger.debug(f"Looking up user by phone: {cleaned_phone}")
-            user = convex_client.query("users:getUserByPhone", {"phone": cleaned_phone})
+            logger.debug(f"Looking up user by phone: {normalized_phone}")
+            user = convex_client.query("users:getUserByPhone", {"phone": normalized_phone})
             if not user:
-                raise ValueError(f"No user found for phone {cleaned_phone}")
+                raise ValueError(f"No user found for phone {normalized_phone}")
             user_id = user["_id"]
             logger.info(f"Found user with ID: {user_id}")
         except Exception as e:
-            logger.error(f"No user found for phone {cleaned_phone}: {e}")
+            logger.error(f"No user found for phone {normalized_phone}: {e}")
             logger.error(f"Error type: {type(e)}")
             logger.error(f"Error details: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No user found for phone number {cleaned_phone}"
+                detail=f"No user found for phone number {normalized_phone}"
             )
 
         # Step 2: Create the message in the database
         message_content = payload.text
         logger.info(f"Storing message for user {user_id}: {message_content}")
 
-        # TODO: Replace with Convex createMessage mutation when messaging queries are migrated
-        # message_result = convex_client.mutation("messaging:createMessage", {
-        #     "user_id": user_id,
-        #     "role": "user",
-        #     "channel": "rest",
-        #     "content": message_content
-        # })
+        message_result = convex_client.mutation("messages:createMessage", {
+            "userId": user_id,
+            "role": "user",
+            "channel": "rest",
+            "content": message_content
+        })
 
         logger.info(f"Successfully stored REST message from {from_number} for user {user_id}")
 
         # Step 3: Generate AI response
         try:
-            # TODO: Replace with Convex getChatByUser query when messaging queries are migrated
-            # chat = convex_client.query("messaging:getChatByUser", {"user_id": user_id})
-            # if not chat:
-            #     logger.error(f"No chat found for phone number {cleaned_phone}")
-            #     raise ValueError(f"No chat found for phone number {cleaned_phone}")
-            # chat_id = chat["_id"]
+            chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
+            if not chat:
+                logger.error(f"No chat found for user {user_id}")
+                raise ValueError(f"No chat found for user {user_id}")
+            chat_id = chat["_id"]
 
             # Create response context
-            # response_context = ResponseContext(
-            #     message_content=message_content,
-            #     chat_id=chat_id,
-            #     channel="rest",
-            #     user_id=user_id,
-            #     convex_client=convex_client,
-            #     phone_number=from_number
-            # )
+            response_context = ResponseContext(
+                message_content=message_content,
+                chat_id=chat_id,
+                channel="rest",
+                user_id=user_id,
+                convex_client=convex_client,
+                phone_number=from_number
+            )
 
             # Generate and capture AI response
-            # ai_response = await generate_ai_response(response_context)
-            # ai_response_container["response"] = ai_response
+            ai_response = await generate_ai_response(response_context)
+            ai_response_container["response"] = ai_response
             logger.info(f"Successfully generated AI response for REST message from {from_number}")
 
         except Exception as e:
@@ -460,64 +461,63 @@ async def _process_inbound_message(request):
         # Get the global Convex client
         convex_client = get_client()
 
-        # Extract and clean phone number
+        # Extract and normalize phone number
         from_number = data["from"]["number"]
-        cleaned_phone = clean_phone_number(from_number)
-        logger.info(f"Processing message from phone: {from_number}, cleaned: {cleaned_phone}")
+        normalized_phone = normalize_phone_number(from_number)
+        logger.info(f"Processing message from phone: {from_number}, normalized: {normalized_phone}")
 
         # Step 1: Get user ID by phone number
         try:
-            logger.debug(f"Looking up user by phone: {cleaned_phone}")
-            user = convex_client.query("users:getUserByPhone", {"phone": cleaned_phone})
+            logger.debug(f"Looking up user by phone: {normalized_phone}")
+            user = convex_client.query("users:getUserByPhone", {"phone": normalized_phone})
             if not user:
-                raise ValueError(f"No user found for phone {cleaned_phone}")
+                raise ValueError(f"No user found for phone {normalized_phone}")
             user_id = user["_id"]
             logger.info(f"Found user with ID: {user_id}")
         except Exception as e:
-            logger.error(f"No user found for phone {cleaned_phone}: {e}")
+            logger.error(f"No user found for phone {normalized_phone}: {e}")
             logger.error(f"Error type: {type(e)}")
             logger.error(f"Error details: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No user found for phone number {cleaned_phone}"
+                detail=f"No user found for phone number {normalized_phone}"
             )
 
         # Step 2: Create the message in the database
         message_content = data["text"]
+        channel = data.get("channel", "sms")
         logger.info(f"Storing message for user {user_id}: {message_content}")
 
-        # TODO: Replace with Convex createMessage mutation when messaging queries are migrated
-        # message_result = convex_client.mutation("messaging:createMessage", {
-        #     "user_id": user_id,
-        #     "role": "user",
-        #     "channel": "sms",
-        #     "content": message_content
-        # })
+        message_result = convex_client.mutation("messages:createMessage", {
+            "userId": user_id,
+            "role": "user",
+            "channel": channel,
+            "content": message_content
+        })
 
-        logger.info(f"Successfully stored inbound SMS message from {from_number} for user {user_id}")
+        logger.info(f"Successfully stored inbound message from {from_number} for user {user_id}")
 
         # Step 3: Generate AI response
         try:
-            # TODO: Replace with Convex getChatByUser query when messaging queries are migrated
-            # chat = convex_client.query("messaging:getChatByUser", {"user_id": user_id})
-            # if not chat:
-            #     logger.error(f"No chat found for phone number {cleaned_phone}")
-            #     raise ValueError(f"No chat found for phone number {cleaned_phone}")
-            # chat_id = chat["_id"]
+            chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
+            if not chat:
+                logger.error(f"No chat found for user {user_id}")
+                raise ValueError(f"No chat found for user {user_id}")
+            chat_id = chat["_id"]
 
             # Create response context
-            # response_context = ResponseContext(
-            #     message_content=message_content,
-            #     chat_id=chat_id,
-            #     channel="sms",
-            #     user_id=user_id,
-            #     convex_client=convex_client,
-            #     phone_number=from_number
-            # )
+            response_context = ResponseContext(
+                message_content=message_content,
+                chat_id=chat_id,
+                channel=channel,
+                user_id=user_id,
+                convex_client=convex_client,
+                phone_number=from_number
+            )
 
             # Generate and send AI response
-            # await generate_ai_response(response_context)
-            logger.info(f"Successfully generated and sent AI response for SMS from {from_number}")
+            await generate_ai_response(response_context)
+            logger.info(f"Successfully generated and sent AI response from {from_number}")
 
         except Exception as e:
             logger.error(f"Error generating AI response for SMS: {str(e)}", exc_info=True)

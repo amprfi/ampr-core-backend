@@ -1,13 +1,10 @@
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, ConfigDict
-from gel import AsyncIOClient
+from convex import ConvexClient
 from typing import List, Dict
-import uuid
 import logging
 
 from pydantic_ai.agent.abstract import RunOutputDataT
-from src.queries.memory.get_user_country_async_edgeql import get_user_country
-from src.queries.memory.get_user_investment_preferences_async_edgeql import get_user_investment_preferences
 from src.models.user_profile import UserProfile
 from src.utils.preprocessing import profile_to_sentences
 
@@ -15,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 class TalkerContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    gel_client: AsyncIOClient
-    user_id: uuid.UUID
+    convex_client: ConvexClient
+    user_id: str
 
 agent = Agent("mistral:mistral-medium", deps_type=TalkerContext)
 
@@ -27,11 +24,10 @@ async def get_user_country_tool(ctx: RunContext[TalkerContext]) -> str:
     """
     logger.info(f"Tool called: get_user_country_tool for user_id={ctx.deps.user_id}")
     try:
-        result = await get_user_country(
-            executor=ctx.deps.gel_client,
-            user_id=ctx.deps.user_id
-        )
-        country = result.country if result else "Unknown"
+        result = ctx.deps.convex_client.query("profiles:getUserCountry", {
+            "userId": ctx.deps.user_id
+        })
+        country = result.get("country") if result else "Unknown"
         logger.info(f"Tool result: get_user_country_tool returned '{country}'")
         return country
     except Exception as e:
@@ -46,10 +42,9 @@ async def user_investment_preferences(ctx: RunContext[TalkerContext]) -> List[st
     """
     logger.info(f"Tool called: user_investment_preferences for user_id={ctx.deps.user_id}")
     try:
-        result = await get_user_investment_preferences(
-            executor=ctx.deps.gel_client,
-            user_id=ctx.deps.user_id
-        )
+        result = ctx.deps.convex_client.query("profiles:getInvestmentPreferences", {
+            "userId": ctx.deps.user_id
+        })
 
         if not result:
             logger.warning("No profile data found")
@@ -58,18 +53,18 @@ async def user_investment_preferences(ctx: RunContext[TalkerContext]) -> List[st
         profile_data = UserProfile(
             country=None,
             kyc_passed=False,
-            stated_investment_horizon=result.stated_investment_horizon.value if result.stated_investment_horizon else None,
-            stated_risk_appetite=result.stated_risk_appetite,
-            stated_investment_knowledge=result.stated_investment_knowledge.value if result.stated_investment_knowledge else None,
-            stated_financial_goals=result.stated_financial_goals,
+            stated_investment_horizon=result.get("stated_investment_horizon"),
+            stated_risk_appetite=result.get("stated_risk_appetite"),
+            stated_investment_knowledge=result.get("stated_investment_knowledge"),
+            stated_financial_goals=result.get("stated_financial_goals"),
             
-            other_investments=result.other_investments,
+            other_investments=result.get("other_investments"),
             
-            inferred_investment_horizon=result.inferred_investment_horizon.value if result.inferred_investment_horizon else None,
-            inferred_risk_appetite=result.inferred_risk_appetite,
-            inferred_investment_knowledge=result.inferred_investment_knowledge.value if result.inferred_investment_knowledge else None,
-            inferred_financial_goals=result.inferred_financial_goals,
-            inferred_investment_thesis=result.inferred_investment_thesis
+            inferred_investment_horizon=result.get("inferred_investment_horizon"),
+            inferred_risk_appetite=result.get("inferred_risk_appetite"),
+            inferred_investment_knowledge=result.get("inferred_investment_knowledge"),
+            inferred_financial_goals=result.get("inferred_financial_goals"),
+            inferred_investment_thesis=result.get("inferred_investment_thesis")
         )
 
         sentences = profile_to_sentences(profile_data)
