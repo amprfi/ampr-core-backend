@@ -15,7 +15,7 @@ class TalkerContext(BaseModel):
     convex_client: ConvexClient
     user_id: str
 
-agent = Agent("mistral:mistral-medium", deps_type=TalkerContext)
+agent = Agent("mistral:mistral-large", deps_type=TalkerContext)
 
 @agent.tool
 async def get_user_country_tool(ctx: RunContext[TalkerContext]) -> str:
