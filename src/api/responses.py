@@ -76,13 +76,16 @@ async def generate_ai_response(context: ResponseContext) -> str:
         logger.info(f"Preprocessed message: {preprocessed_message}")
         
         # Store the user message with both original and preprocessed content
-        context.convex_client.mutation("messages:createMessage", {
+        message_args: dict = {
             "userId": context.user_id,
             "role": "user",
             "channel": context.channel,
             "content": context.message_content,
-            "preprocessed_content": preprocessed_message if preprocessed_message != context.message_content else None
-        })
+        }
+        if preprocessed_message and preprocessed_message != context.message_content:
+            message_args["preprocessed_content"] = preprocessed_message
+        
+        context.convex_client.mutation("messages:createMessage", message_args)
         logger.info(f"Stored user message in database for chat {context.chat_id}")
 
         # Check for module triggers (using preprocessed message)
