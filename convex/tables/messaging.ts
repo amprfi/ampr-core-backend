@@ -27,7 +27,8 @@ export const chats = defineTable({
 export const messages = defineTable({
   role: v.string(), // "user" or "assistant"
   channel: v.string(), // "application", "sms", "whatsapp", or "email"
-  content: v.string(),
+  content: v.string(), // Original message content (shown to user)
+  preprocessed_content: v.optional(v.string()), // Preprocessed content (used by agents) - only for user messages
   chat: v.id("chats"),
   status: MessageStatus,
 })

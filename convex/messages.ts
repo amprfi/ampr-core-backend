@@ -18,6 +18,7 @@ export const createMessage = mutation({
     role: v.string(),
     channel: v.string(),
     content: v.string(),
+    preprocessed_content: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     let chat = await ctx.db
@@ -40,6 +41,7 @@ export const createMessage = mutation({
       role: args.role,
       channel: args.channel,
       content: args.content,
+      preprocessed_content: args.preprocessed_content,
       status: "Current",
     });
 

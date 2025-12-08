@@ -287,20 +287,11 @@ async def handle_rest_message(
                 detail=f"No user found for phone number {normalized_phone}"
             )
 
-        # Step 2: Create the message in the database
+        # Step 2: Get message content
         message_content = payload.text
-        logger.info(f"Storing message for user {user_id}: {message_content}")
+        logger.info(f"Processing message for user {user_id}: {message_content}")
 
-        message_result = convex_client.mutation("messages:createMessage", {
-            "userId": user_id,
-            "role": "user",
-            "channel": "rest",
-            "content": message_content
-        })
-
-        logger.info(f"Successfully stored REST message from {from_number} for user {user_id}")
-
-        # Step 3: Generate AI response
+        # Step 3: Generate AI response (which will also store the user message)
         try:
             chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
             if not chat:
@@ -483,21 +474,12 @@ async def _process_inbound_message(request):
                 detail=f"No user found for phone number {normalized_phone}"
             )
 
-        # Step 2: Create the message in the database
+        # Step 2: Get message content
         message_content = data["text"]
         channel = data.get("channel", "sms")
-        logger.info(f"Storing message for user {user_id}: {message_content}")
+        logger.info(f"Processing message for user {user_id}: {message_content}")
 
-        message_result = convex_client.mutation("messages:createMessage", {
-            "userId": user_id,
-            "role": "user",
-            "channel": channel,
-            "content": message_content
-        })
-
-        logger.info(f"Successfully stored inbound message from {from_number} for user {user_id}")
-
-        # Step 3: Generate AI response
+        # Step 3: Generate AI response (which will also store the user message)
         try:
             chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
             if not chat:

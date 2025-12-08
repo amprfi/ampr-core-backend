@@ -13,6 +13,7 @@ import json
 from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
+from ..agents.preprocessor import get_preprocessor_agent, PreprocessorContext
 from ..clients.vonage_client import VonageClient
 from ..modules.registry import get_module_registry
 
@@ -63,15 +64,36 @@ async def generate_ai_response(context: ResponseContext) -> str:
     try:
         logger.info(f"Generating AI response for {context.channel} message in chat {context.chat_id}")
 
-        # Check for module triggers
+        # Preprocess the message (convert relative dates to explicit dates)
+        preprocessor_agent = get_preprocessor_agent()
+        preprocessor_context = PreprocessorContext()
+        
+        logger.info("Running message preprocessor")
+        preprocessor_result = await preprocessor_agent.run(context.message_content, deps=preprocessor_context)
+        preprocessed_message = preprocessor_result.output
+        
+        logger.info(f"Original message: {context.message_content}")
+        logger.info(f"Preprocessed message: {preprocessed_message}")
+        
+        # Store the user message with both original and preprocessed content
+        context.convex_client.mutation("messages:createMessage", {
+            "userId": context.user_id,
+            "role": "user",
+            "channel": context.channel,
+            "content": context.message_content,
+            "preprocessed_content": preprocessed_message if preprocessed_message != context.message_content else None
+        })
+        logger.info(f"Stored user message in database for chat {context.chat_id}")
+
+        # Check for module triggers (using preprocessed message)
         module_registry = get_module_registry()
-        module_name = module_registry.detect_module_trigger(context.message_content)
+        module_name = module_registry.detect_module_trigger(preprocessed_message)
         module_response = None
         
         if module_name:
             logger.info(f"Module '{module_name}' detected, invoking module")
             try:
-                module_response = await module_registry.invoke_module(module_name, context.message_content)
+                module_response = await module_registry.invoke_module(module_name, preprocessed_message)
                 logger.info(f"Module '{module_name}' returned response")
             except Exception as e:
                 error_msg = f"Module '{module_name}' failed: {str(e)}"
@@ -113,9 +135,11 @@ async def generate_ai_response(context: ResponseContext) -> str:
         for message in recent_messages:
             from datetime import datetime
             timestamp_iso = datetime.fromtimestamp(message["_creationTime"] / 1000).isoformat() if message.get("_creationTime") else None
+            # Use preprocessed_content for agents if available (for user messages), else use content
+            content_for_agent = message.get("preprocessed_content") if message.get("preprocessed_content") else message["content"]
             message_history.append({
                 "role": message["role"],
-                "content": message["content"],
+                "content": content_for_agent,
                 "timestamp": timestamp_iso
             })
 
@@ -135,7 +159,7 @@ async def generate_ai_response(context: ResponseContext) -> str:
 
         [CURRENT MESSAGE]
         User message:
-        {context.message_content}
+        {preprocessed_message}
 
         [MODULE RESPONSE]
         A specialized module has processed this request and returned the following response:
@@ -155,7 +179,7 @@ async def generate_ai_response(context: ResponseContext) -> str:
 
         [CURRENT MESSAGE]
         Current message to respond to:
-        {context.message_content}
+        {preprocessed_message}
         """
 
         # Get the agent response with enhanced context

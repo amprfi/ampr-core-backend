@@ -59,6 +59,7 @@ export const getChat = query({
         role: m.role,
         channel: m.channel,
         content: m.content,
+        preprocessed_content: m.preprocessed_content,
         status: m.status,
       })),
       summaries: summaries.map(s => ({
