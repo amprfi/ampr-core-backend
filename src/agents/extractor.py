@@ -36,7 +36,7 @@ class ExtractedProfile(BaseModel):
     )
 
 agent = Agent(
-    "mistral:mistral-small",
+    "mistral:mistral-small-latest",
     deps_type=ExtractorContext,
     output_type=ExtractedProfile
 )
@@ -48,25 +48,24 @@ async def get_current_profile(ctx: RunContext[ExtractorContext]) -> str:
     """
     logger.info(f"Tool called: get_current_profile for user_id={ctx.deps.user_id}")
     try:
-        result = await get_user_investment_preferences(
-            executor=ctx.deps.gel_client,
-            user_id=ctx.deps.user_id
-        )
+        result = ctx.deps.convex_client.query("profiles:getInvestmentPreferences", {
+            "userId": ctx.deps.user_id
+        })
         
         if not result:
             return "No existing profile data found. All fields are empty."
         
         profile_summary = []
-        if result.inferred_investment_horizon:
-            profile_summary.append(f"Investment horizon: {result.inferred_investment_horizon.value}")
-        if result.inferred_risk_appetite:
-            profile_summary.append(f"Risk appetite: {result.inferred_risk_appetite}")
-        if result.inferred_investment_knowledge:
-            profile_summary.append(f"Investment knowledge: {result.inferred_investment_knowledge.value}")
-        if result.inferred_financial_goals:
-            profile_summary.append(f"Financial goals: {', '.join(result.inferred_financial_goals)}")
-        if result.inferred_investment_thesis:
-            profile_summary.append(f"Investment thesis: {result.inferred_investment_thesis}")
+        if result.get("inferred_investment_horizon"):
+            profile_summary.append(f"Investment horizon: {result['inferred_investment_horizon']}")
+        if result.get("inferred_risk_appetite"):
+            profile_summary.append(f"Risk appetite: {result['inferred_risk_appetite']}")
+        if result.get("inferred_investment_knowledge"):
+            profile_summary.append(f"Investment knowledge: {result['inferred_investment_knowledge']}")
+        if result.get("inferred_financial_goals"):
+            profile_summary.append(f"Financial goals: {', '.join(result['inferred_financial_goals'])}")
+        if result.get("inferred_investment_thesis"):
+            profile_summary.append(f"Investment thesis: {result['inferred_investment_thesis']}")
         
         if not profile_summary:
             return "No existing inferred profile data. All fields are empty."

@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 class SummarizerContext(BaseModel):
     pass
 
-agent = Agent("mistral:mistral-small", deps_type=SummarizerContext)
+agent = Agent("mistral:mistral-small-latest", deps_type=SummarizerContext)
 
 PROMPT_TEMPLATE = """
 You are an expert conversation archivist. Your goal is to summarize the following batch of conversation messages into a single, concise paragraph.
