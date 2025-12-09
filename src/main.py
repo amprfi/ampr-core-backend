@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -7,6 +10,13 @@ from fastapi.responses import JSONResponse
 
 from .api import users
 from .api import webhooks
+
+# Configure logging for Railway/production
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 fast_api = FastAPI()
 
