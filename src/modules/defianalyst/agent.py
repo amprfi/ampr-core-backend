@@ -479,6 +479,78 @@ async def get_coins_by_fdv(
         return error_msg
 
 
+@agent.tool
+async def get_coin_ath_atl(
+    ctx: RunContext[DeFiAnalystContext],
+    coin_id: str,
+    vs_currency: str = "usd"
+) -> str:
+    """
+    Get all-time high (ATH) and all-time low (ATL) data for a cryptocurrency.
+    
+    Args:
+        coin_id: CoinGecko coin ID (e.g., "bitcoin", "ethereum", "solana")
+        vs_currency: Target currency (default "usd")
+        
+    Returns:
+        Formatted string with ATH/ATL prices, dates, and percentage changes from current price
+    """
+    logger.info(f"Tool called: get_coin_ath_atl for {coin_id}, currency={vs_currency}")
+    
+    try:
+        data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+        
+        market_data = data.get("market_data", {})
+        
+        ath = market_data.get("ath", {}).get(vs_currency)
+        ath_date = market_data.get("ath_date", {}).get(vs_currency)
+        ath_change_pct = market_data.get("ath_change_percentage", {}).get(vs_currency)
+        
+        atl = market_data.get("atl", {}).get(vs_currency)
+        atl_date = market_data.get("atl_date", {}).get(vs_currency)
+        atl_change_pct = market_data.get("atl_change_percentage", {}).get(vs_currency)
+        
+        current_price = market_data.get("current_price", {}).get(vs_currency)
+        
+        coin_name = data.get("name", coin_id)
+        coin_symbol = data.get("symbol", "").upper()
+        
+        if ath is None and atl is None:
+            return f"No ATH/ATL data available for {coin_name} ({coin_symbol})"
+        
+        lines = [f"{coin_name} ({coin_symbol}) All-Time Data:"]
+        
+        if current_price is not None:
+            current_price_str = f"${current_price:,.2f}" if current_price >= 0.01 else f"${current_price:.6f}"
+            lines.append(f"Current Price: {current_price_str}")
+        
+        if ath is not None:
+            ath_str = f"${ath:,.2f}" if ath >= 0.01 else f"${ath:.6f}"
+            ath_date_str = ath_date[:10] if ath_date else "Unknown"
+            lines.append(f"All-Time High: {ath_str} on {ath_date_str}")
+            
+            if ath_change_pct is not None:
+                lines.append(f"Down {abs(ath_change_pct):.2f}% from ATH")
+        
+        if atl is not None:
+            atl_str = f"${atl:,.2f}" if atl >= 0.01 else f"${atl:.6f}"
+            atl_date_str = atl_date[:10] if atl_date else "Unknown"
+            lines.append(f"All-Time Low: {atl_str} on {atl_date_str}")
+            
+            if atl_change_pct is not None:
+                lines.append(f"Up {abs(atl_change_pct):.2f}% from ATL")
+        
+        result = "\n".join(lines)
+        
+        logger.info(f"Tool result: Successfully retrieved ATH/ATL data for {coin_id}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"Failed to retrieve ATH/ATL data for {coin_id}: {str(e)}"
+        logger.error(f"Tool error: get_coin_ath_atl - {error_msg}")
+        return error_msg
+
+
 PROMPT_TEMPLATE = """
 You are DeFi Analyst, a cryptocurrency market data specialist powered by CoinGecko.
 
@@ -491,6 +563,7 @@ CAPABILITIES:
 - Get top performing coins (gainers/losers) over various timeframes
 - Compare price performance between multiple cryptocurrencies
 - Rank coins by market capitalization or fully diluted valuation
+- Get all-time high (ATH) and all-time low (ATL) data with dates and percentage changes
 
 IMPORTANT GUIDELINES:
 1. Use search_coin_by_name_or_symbol first if you're unsure of the exact coin ID
@@ -522,6 +595,11 @@ For "largest/top coins by market cap" → use get_coins_by_market_cap
 For "largest/top coins by FDV" or "fully diluted" → use get_coins_by_fdv
   * Returns rankings by fully diluted valuation
   * Shows FDV value and market cap rank for reference
+
+For "all-time high/low" or "ATH/ATL" questions → use get_coin_ath_atl
+  * Returns ATH price, ATH date, and percentage down from ATH
+  * Returns ATL price, ATL date, and percentage up from ATL
+  * Shows current price for reference
 
 RESPONSE FORMAT:
 Your responses should include the structured data returned by the tool with a brief summary.
