@@ -11,6 +11,19 @@ export const MessageStatus = v.union(
 );
 
 /**
+ * Enum validator for channel
+ */
+export const Channel = v.union(
+  v.literal("sms"),
+  v.literal("rcs"),
+  v.literal("whatsapp"),
+  v.literal("telegram"),
+  v.literal("email"),
+  v.literal("app"),
+  v.literal("rest")
+);
+
+/**
  * Chats table - conversation containers owned by users
  */
 export const chats = defineTable({
@@ -26,7 +39,7 @@ export const chats = defineTable({
  */
 export const messages = defineTable({
   role: v.string(), // "user" or "assistant"
-  channel: v.string(), // "application", "sms", "whatsapp", or "email"
+  channel: Channel,
   content: v.string(), // Original message content (shown to user)
   preprocessed_content: v.optional(v.string()), // Preprocessed content (used by agents) - only for user messages
   chat: v.id("chats"),

@@ -27,10 +27,11 @@ class ResponseContext:
     Attributes:
         message_content: The content of the user's message
         chat_id: The ID of the chat
-        channel: The channel (sms or chat)
+        channel: The channel (sms, chat, telegram)
         user_id: The ID of the user
         convex_client: Convex client
         phone_number: Optional phone number for SMS responses
+        telegram_id: Optional Telegram chat ID for Telegram responses
     """
     def __init__(
         self,
@@ -39,7 +40,8 @@ class ResponseContext:
         channel: str,
         user_id: str,
         convex_client: ConvexClient,
-        phone_number: Optional[str] = None
+        phone_number: Optional[str] = None,
+        telegram_id: Optional[str] = None
     ):
         self.message_content = message_content
         self.chat_id = chat_id
@@ -47,6 +49,7 @@ class ResponseContext:
         self.user_id = user_id
         self.convex_client = convex_client
         self.phone_number = phone_number
+        self.telegram_id = telegram_id
 
 async def generate_ai_response(context: ResponseContext) -> str:
     """
@@ -217,6 +220,21 @@ async def generate_ai_response(context: ResponseContext) -> str:
                 logger.info(f"Successfully sent SMS response to {context.phone_number}")
             else:
                 logger.error(f"Failed to send SMS response to {context.phone_number}")
+        
+        # For Telegram responses, send the message via Telegram Bot API
+        if context.channel == "telegram" and context.telegram_id:
+            from ..clients.telegram_client import TelegramClient
+            telegram_client = TelegramClient()
+            telegram_result = await telegram_client.send_message(
+                chat_id=int(context.telegram_id),
+                text=response_content
+            )
+            await telegram_client.close()
+            
+            if telegram_result:
+                logger.info(f"Successfully sent Telegram response to {context.telegram_id}")
+            else:
+                logger.error(f"Failed to send Telegram response to {context.telegram_id}")
         
         # --- MEMORY MANAGEMENT ---
         # Trigger the background memory management process

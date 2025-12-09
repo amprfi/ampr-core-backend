@@ -41,9 +41,13 @@ import jwt
 from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel
 import json
+from aiogram.types import Update as TelegramUpdate
+from aiogram.types import Message as TelegramMessage
+from aiogram.types import Contact
 
 from ..clients.convex_client import get_client
 from ..api.responses import generate_ai_response, ResponseContext
+from ..config.telegram_config import get_telegram_webhook_secret
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -552,3 +556,184 @@ async def handle_message_status(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error processing status: {str(e)}"
         )
+
+def verify_telegram_secret(request: Request) -> bool:
+    """
+    Verify the secret token from Telegram webhook request.
+    
+    Args:
+        request: The incoming request
+        
+    Returns:
+        bool: True if secret is valid
+    """
+    secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    expected_secret = get_telegram_webhook_secret()
+    return secret_header == expected_secret
+
+
+@router.post("/telegram", status_code=status.HTTP_200_OK)
+async def handle_telegram_webhook(request: Request):
+    """
+    Handle incoming updates from Telegram via webhook.
+    
+    Flow:
+    1. Verify webhook secret
+    2. Parse Telegram update
+    3. Check if user shared contact (first time) → link account
+    4. Check if user exists (by telegram_id or phone)
+    5. Process message through standard pipeline
+    6. Response sent via Telegram (in responses.py)
+    
+    Args:
+        request: The incoming webhook request from Telegram
+        
+    Returns:
+        dict: Success response
+    """
+    logger.info("Received Telegram webhook update")
+    
+    # Verify secret token
+    if not verify_telegram_secret(request):
+        logger.error("Invalid Telegram webhook secret")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid secret token"
+        )
+    
+    try:
+        # Parse update
+        data = await request.json()
+        update = TelegramUpdate.model_validate(data)
+        
+        # Only handle text messages for now
+        if not update.message:
+            logger.info("Ignoring non-message update")
+            return {"status": "ok"}
+        
+        message: TelegramMessage = update.message
+        
+        # Ensure from_user exists
+        if not message.from_user:
+            logger.error("Message missing from_user information")
+            return {"status": "ok"}
+        
+        # Ensure message has text
+        if not message.text:
+            logger.info("Ignoring non-text message")
+            return {"status": "ok"}
+        
+        telegram_id = str(message.from_user.id)
+        message_text = message.text
+        
+        logger.info(f"Processing Telegram message from user {telegram_id}: {message_text}")
+        
+        # Get Convex client
+        convex_client = get_client()
+        
+        # Check if user shared contact (for linking)
+        if message.contact:
+            await _handle_contact_sharing(convex_client, message.contact, telegram_id)
+            return {"status": "ok", "message": "Contact linked"}
+        
+        # Look up user by Telegram ID
+        user = convex_client.query("users:getUserByTelegramId", {"telegram_id": telegram_id})
+        
+        if not user:
+            # User not linked yet - request phone number
+            logger.info(f"Telegram user {telegram_id} not linked, requesting phone")
+            await _request_phone_number(telegram_id)
+            return {"status": "ok", "message": "Phone requested"}
+        
+        user_id = user["_id"]
+        logger.info(f"Found linked user: {user_id}")
+        
+        # Get or create chat
+        chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
+        if not chat:
+            logger.error(f"No chat found for user {user_id}")
+            raise ValueError(f"No chat found for user {user_id}")
+        
+        chat_id = chat["_id"]
+        
+        # Generate AI response (same flow as SMS/web)
+        response_context = ResponseContext(
+            message_content=message_text,
+            chat_id=chat_id,
+            channel="telegram",
+            user_id=user_id,
+            convex_client=convex_client,
+            telegram_id=telegram_id
+        )
+        
+        await generate_ai_response(response_context)
+        logger.info(f"Successfully processed Telegram message from {telegram_id}")
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        logger.error(f"Error processing Telegram webhook: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing update: {str(e)}"
+        )
+
+
+async def _handle_contact_sharing(convex_client, contact: Contact, telegram_id: str):
+    """
+    Handle when user shares their phone number contact.
+    Links the Telegram ID to the user account.
+    """
+    phone_number = contact.phone_number
+    normalized_phone = normalize_phone_number(phone_number)
+    
+    logger.info(f"User {telegram_id} shared phone: {normalized_phone}")
+    
+    try:
+        # Link Telegram ID to user
+        convex_client.mutation("users:linkTelegramToUser", {
+            "phone": normalized_phone,
+            "telegram_id": telegram_id
+        })
+        logger.info(f"Linked Telegram ID {telegram_id} to phone {normalized_phone}")
+        
+        # Send confirmation
+        from ..clients.telegram_client import TelegramClient
+        telegram_client = TelegramClient()
+        await telegram_client.send_message(
+            chat_id=int(telegram_id),
+            text="✅ Your account has been linked! You can now chat with me."
+        )
+        await telegram_client.close()
+        
+    except Exception as e:
+        logger.error(f"Error linking Telegram account: {str(e)}")
+        raise
+
+
+async def _request_phone_number(telegram_id: str):
+    """
+    Request phone number from unlinked Telegram user.
+    Sends a message with a button to share contact.
+    """
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    from ..clients.telegram_client import TelegramClient
+    
+    # Create keyboard with contact request button
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Share Phone Number", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    
+    telegram_client = TelegramClient()
+    
+    # Send request message
+    await telegram_client.bot.send_message(
+        chat_id=int(telegram_id),
+        text="👋 Welcome! To get started, please share your phone number so I can link your account.",
+        reply_markup=keyboard
+    )
+    
+    await telegram_client.close()
+    logger.info(f"Sent phone request to Telegram user {telegram_id}")

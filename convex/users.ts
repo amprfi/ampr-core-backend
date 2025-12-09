@@ -28,6 +28,19 @@ export const getUserByPhone = query({
 });
 
 /**
+ * Get user by Telegram ID
+ */
+export const getUserByTelegramId = query({
+  args: { telegram_id: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("users")
+      .withIndex("by_telegram_id", (q) => q.eq("telegram_id", args.telegram_id))
+      .first();
+  },
+});
+
+/**
  * Get all users
  */
 export const getUsers = query({
@@ -85,5 +98,33 @@ export const createUser = mutation({
     });
     
     return await ctx.db.get(userId);
+  },
+});
+
+/**
+ * Link a Telegram ID to an existing user (by phone number)
+ */
+export const linkTelegramToUser = mutation({
+  args: {
+    phone: v.string(),
+    telegram_id: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // Find user by phone
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_phone", (q) => q.eq("phone", args.phone))
+      .first();
+    
+    if (!user) {
+      throw new Error(`No user found with phone ${args.phone}`);
+    }
+    
+    // Update user with Telegram ID
+    await ctx.db.patch(user._id, {
+      telegram_id: args.telegram_id,
+    });
+    
+    return user._id;
   },
 });

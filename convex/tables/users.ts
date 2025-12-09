@@ -6,6 +6,8 @@ export const users = defineTable({
   last_name: v.string(),
   email: v.string(),
   phone: v.string(),
+  telegram_id: v.optional(v.string()),
 })
   .index("by_email", ["email"])
-  .index("by_phone", ["phone"]);
+  .index("by_phone", ["phone"])
+  .index("by_telegram_id", ["telegram_id"]);

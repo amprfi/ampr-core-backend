@@ -6,7 +6,7 @@ authors = [
     {name = "Chris Georgen",email = "c-georgen@users.noreply.github.com"}
 ]
 readme = "README.md"
-requires-python = "<4.0,>=3.10"
+requires-python = "<3.15,>=3.10"
 dependencies = [
     "pydantic[email] (>=2.11.7,<3.0.0)",
     "fastapi (>=0.115.14,<0.116.0)",
@@ -21,7 +21,8 @@ dependencies = [
     "pydantic-ai (>=1.0.9,<2.0.0)",
     "vonage (>=4.7.1,<5.0.0)",
     "vonage-messages (>=1.6.2,<2.0.0)",
-    "convex (>=0.7.0,<0.8.0)"
+    "convex (>=0.7.0,<0.8.0)",
+    "aiogram (>=3.23.0,<4.0.0)"
     ]
 
 [build-system]
