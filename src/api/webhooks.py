@@ -642,7 +642,40 @@ async def handle_telegram_webhook(request: Request):
         user = convex_client.query("users:getUserByTelegramId", {"telegram_id": telegram_id})
         
         if not user:
-            # User not linked yet - request phone number
+            # User not linked yet - check if they typed a phone number
+            if message.text and message.text.replace('+', '').replace('-', '').replace(' ', '').isdigit():
+                # They typed a phone number - treat it as linking attempt
+                logger.info(f"User {telegram_id} typed phone number for linking: {message.text}")
+                normalized_phone = normalize_phone_number(message.text)
+                
+                try:
+                    result = convex_client.mutation("users:linkTelegramToUser", {
+                        "phone": normalized_phone,
+                        "telegram_id": telegram_id
+                    })
+                    logger.info(f"Successfully linked Telegram ID {telegram_id} to phone {normalized_phone}, user_id: {result}")
+                    
+                    from ..clients.telegram_client import TelegramClient
+                    telegram_client = TelegramClient()
+                    await telegram_client.send_message(
+                        chat_id=int(telegram_id),
+                        text="✅ Your account has been linked! You can now chat with me."
+                    )
+                    await telegram_client.close()
+                    return {"status": "ok", "message": "Linked via typed phone"}
+                    
+                except Exception as e:
+                    logger.error(f"Error linking typed phone {normalized_phone}: {str(e)}", exc_info=True)
+                    from ..clients.telegram_client import TelegramClient
+                    telegram_client = TelegramClient()
+                    await telegram_client.send_message(
+                        chat_id=int(telegram_id),
+                        text=f"❌ Could not link your account. No user found with phone {normalized_phone}."
+                    )
+                    await telegram_client.close()
+                    return {"status": "ok", "message": "Link failed"}
+            
+            # Request phone number
             logger.info(f"Telegram user {telegram_id} not linked, requesting phone")
             await _request_phone_number(telegram_id)
             return {"status": "ok", "message": "Phone requested"}
