@@ -618,23 +618,23 @@ async def handle_telegram_webhook(request: Request):
             logger.error("Message missing from_user information")
             return {"status": "ok"}
         
-        # Ensure message has text
-        if not message.text:
-            logger.info("Ignoring non-text message")
-            return {"status": "ok"}
-        
         telegram_id = str(message.from_user.id)
-        message_text = message.text
+        message_text = message.text or ""
         
         logger.info(f"Processing Telegram message from user {telegram_id}: {message_text}")
         
         # Get Convex client
         convex_client = get_client()
         
-        # Check if user shared contact (for linking)
+        # Check if user shared contact (for linking) - handle BEFORE text check
         if message.contact:
             await _handle_contact_sharing(convex_client, message.contact, telegram_id)
             return {"status": "ok", "message": "Contact linked"}
+        
+        # Ensure message has text
+        if not message.text:
+            logger.info("Ignoring non-text, non-contact message")
+            return {"status": "ok"}
         
         # Look up user by Telegram ID
         user = convex_client.query("users:getUserByTelegramId", {"telegram_id": telegram_id})
