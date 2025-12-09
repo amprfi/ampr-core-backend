@@ -622,12 +622,14 @@ async def handle_telegram_webhook(request: Request):
         message_text = message.text or ""
         
         logger.info(f"Processing Telegram message from user {telegram_id}: {message_text}")
+        logger.info(f"Message has contact: {message.contact is not None}, has text: {message.text is not None}")
         
         # Get Convex client
         convex_client = get_client()
         
         # Check if user shared contact (for linking) - handle BEFORE text check
         if message.contact:
+            logger.info(f"Contact detected! Processing contact sharing for user {telegram_id}")
             await _handle_contact_sharing(convex_client, message.contact, telegram_id)
             return {"status": "ok", "message": "Contact linked"}
         
