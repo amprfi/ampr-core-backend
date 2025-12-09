@@ -687,15 +687,15 @@ async def _handle_contact_sharing(convex_client, contact: Contact, telegram_id: 
     phone_number = contact.phone_number
     normalized_phone = normalize_phone_number(phone_number)
     
-    logger.info(f"User {telegram_id} shared phone: {normalized_phone}")
+    logger.info(f"User {telegram_id} shared contact - raw phone: {phone_number}, normalized: {normalized_phone}")
     
     try:
         # Link Telegram ID to user
-        convex_client.mutation("users:linkTelegramToUser", {
+        result = convex_client.mutation("users:linkTelegramToUser", {
             "phone": normalized_phone,
             "telegram_id": telegram_id
         })
-        logger.info(f"Linked Telegram ID {telegram_id} to phone {normalized_phone}")
+        logger.info(f"Successfully linked Telegram ID {telegram_id} to phone {normalized_phone}, user_id: {result}")
         
         # Send confirmation
         from ..clients.telegram_client import TelegramClient
@@ -707,7 +707,15 @@ async def _handle_contact_sharing(convex_client, contact: Contact, telegram_id: 
         await telegram_client.close()
         
     except Exception as e:
-        logger.error(f"Error linking Telegram account: {str(e)}")
+        logger.error(f"Error linking Telegram account - phone: {normalized_phone}, error: {str(e)}", exc_info=True)
+        # Send error message to user
+        from ..clients.telegram_client import TelegramClient
+        telegram_client = TelegramClient()
+        await telegram_client.send_message(
+            chat_id=int(telegram_id),
+            text=f"❌ Could not link your account. Please make sure your phone number {normalized_phone} is registered."
+        )
+        await telegram_client.close()
         raise
 
 
