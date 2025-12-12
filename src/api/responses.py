@@ -14,7 +14,6 @@ from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
 from ..agents.preprocessor import get_preprocessor_agent, PreprocessorContext
-from ..clients.vonage_client import VonageClient
 from ..modules.registry import get_module_registry
 
 # Set up logging
@@ -207,19 +206,6 @@ async def generate_ai_response(context: ResponseContext) -> str:
         })
 
         logger.info(f"Stored AI response in database for chat {context.chat_id}")
-
-        # For SMS responses, send the message via Vonage
-        if context.channel == "sms" and context.phone_number:
-            vonage_client = VonageClient()
-            sms_result = vonage_client.send_sms(
-                to=context.phone_number,
-                text=response_content
-            )
-
-            if sms_result:
-                logger.info(f"Successfully sent SMS response to {context.phone_number}")
-            else:
-                logger.error(f"Failed to send SMS response to {context.phone_number}")
         
         # For Telegram responses, send the message via Telegram Bot API
         if context.channel == "telegram" and context.telegram_id:
