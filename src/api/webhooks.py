@@ -604,6 +604,7 @@ async def handle_telegram_webhook(request: Request):
     try:
         # Parse update
         data = await request.json()
+        logger.debug(f"Telegram update data: {data}")
         update = TelegramUpdate.model_validate(data)
         
         # Get Convex client
@@ -611,11 +612,12 @@ async def handle_telegram_webhook(request: Request):
         
         # Handle callback queries (inline keyboard button clicks)
         if update.callback_query:
+            logger.info(f"Callback query detected: {update.callback_query}")
             return await _handle_callback_query(update.callback_query, convex_client)
         
         # Only handle text messages for now
         if not update.message:
-            logger.info("Ignoring non-message update")
+            logger.info(f"Ignoring non-message update. Update type: message={update.message}, callback_query={update.callback_query}")
             return {"status": "ok"}
         
         message: TelegramMessage = update.message
