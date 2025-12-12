@@ -604,7 +604,7 @@ async def handle_telegram_webhook(request: Request):
     try:
         # Parse update
         data = await request.json()
-        logger.debug(f"Telegram update data: {data}")
+        logger.info(f"Telegram update data: {data}")
         update = TelegramUpdate.model_validate(data)
         
         # Get Convex client
@@ -736,11 +736,15 @@ async def _show_user_options(telegram_id: str):
         [{"text": "🔗 Link my existing account", "callback_data": "link_account"}]
     ])
     
-    await telegram_client.send_message(
+    logger.info(f"Created inline keyboard: {keyboard.model_dump() if hasattr(keyboard, 'model_dump') else keyboard}")
+    
+    result = await telegram_client.send_message(
         chat_id=int(telegram_id),
         text="👋 Welcome to Ampr! How would you like to get started?",
         reply_markup=keyboard
     )
+    
+    logger.info(f"Send message result: {result}")
     
     await telegram_client.close()
     logger.info(f"Sent user options to Telegram user {telegram_id}")
