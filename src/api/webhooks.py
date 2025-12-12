@@ -648,6 +648,52 @@ async def handle_telegram_webhook(request: Request):
         user = convex_client.query("users:getUserByTelegramId", {"telegram_id": telegram_id})
         
         if not user:
+            # Check if user typed a phone number or email (for linking)
+            if message_text and (message_text.replace('+', '').replace('-', '').replace(' ', '').isdigit() or '@' in message_text):
+                logger.info(f"User {telegram_id} provided contact info for linking: {message_text}")
+                
+                # Try to find existing user by phone or email
+                existing_user = None
+                if '@' in message_text:
+                    # Email
+                    try:
+                        existing_user = convex_client.query("users:getUserByEmail", {"email": message_text})
+                    except Exception as e:
+                        logger.info(f"No user found with email {message_text}")
+                else:
+                    # Phone number
+                    normalized_phone = normalize_phone_number(message_text)
+                    try:
+                        existing_user = convex_client.query("users:getUserByPhone", {"phone": normalized_phone})
+                    except Exception as e:
+                        logger.info(f"No user found with phone {normalized_phone}")
+                
+                if existing_user:
+                    # Link telegram_id to existing user
+                    convex_client.mutation("users:updateUser", {
+                        "id": existing_user["_id"],
+                        "telegram_id": telegram_id
+                    })
+                    
+                    from ..clients.telegram_client import TelegramClient
+                    telegram_client = TelegramClient()
+                    await telegram_client.send_message(
+                        chat_id=int(telegram_id),
+                        text="✅ Your account has been linked! You can now chat with me."
+                    )
+                    await telegram_client.close()
+                    return {"status": "ok", "message": "Account linked"}
+                else:
+                    from ..clients.telegram_client import TelegramClient
+                    telegram_client = TelegramClient()
+                    await telegram_client.send_message(
+                        chat_id=int(telegram_id),
+                        text=f"❌ No existing account found with {message_text}. Please try again or select 'I'm new to Ampr' to create a new account."
+                    )
+                    await telegram_client.close()
+                    await _show_user_options(telegram_id)
+                    return {"status": "ok", "message": "Account not found"}
+            
             # Show inline keyboard with options
             logger.info(f"Telegram user {telegram_id} not found, showing options")
             await _show_user_options(telegram_id)
@@ -655,6 +701,33 @@ async def handle_telegram_webhook(request: Request):
         
         user_id = user["_id"]
         logger.info(f"Found linked user: {user_id}")
+        
+        # Check if user needs onboarding
+        if not user.get("onboarding_complete"):
+            logger.info(f"User {user_id} needs onboarding, routing to onboarding agent")
+            from ..clients.telegram_client import TelegramClient
+            from ..agents.onboarding import get_onboarding_agent, OnboardingContext
+            
+            onboarding_agent = get_onboarding_agent()
+            onboarding_context = OnboardingContext(
+                convex_client=convex_client,
+                user_id=user_id,
+                telegram_id=telegram_id
+            )
+            
+            result = await onboarding_agent.run(
+                message_text,
+                deps=onboarding_context
+            )
+            
+            telegram_client = TelegramClient()
+            await telegram_client.send_message(
+                chat_id=int(telegram_id),
+                text=result.output
+            )
+            await telegram_client.close()
+            
+            return {"status": "ok", "message": "Onboarding message processed"}
         
         # Get chat (will be auto-created by createMessage if it doesn't exist)
         chat = convex_client.query("chats:getChatByUser", {"userId": user_id})

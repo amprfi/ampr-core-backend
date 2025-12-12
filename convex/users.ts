@@ -133,6 +133,7 @@ export const createUser = mutation({
       email: args.email,
       phone: args.phone,
       telegram_id: args.telegram_id,
+      onboarding_complete: false,
     });
     
     return await ctx.db.get(userId);
@@ -150,12 +151,13 @@ export const updateUser = mutation({
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
     telegram_id: v.optional(v.string()),
+    onboarding_complete: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { id, ...updateFields } = args;
     
     // Remove undefined fields
-    const fieldsToUpdate: Record<string, string> = {};
+    const fieldsToUpdate: Record<string, string | boolean> = {};
     for (const [key, value] of Object.entries(updateFields)) {
       if (value !== undefined) {
         fieldsToUpdate[key] = value;
@@ -167,10 +169,10 @@ export const updateUser = mutation({
     }
     
     // Check for duplicate email if updating email
-    if (fieldsToUpdate.email) {
+    if (fieldsToUpdate.email && typeof fieldsToUpdate.email === "string") {
       const existingEmail = await ctx.db
         .query("users")
-        .withIndex("by_email", (q) => q.eq("email", fieldsToUpdate.email))
+        .withIndex("by_email", (q) => q.eq("email", fieldsToUpdate.email as string))
         .first();
       if (existingEmail && existingEmail._id !== id) {
         throw new Error(
@@ -180,10 +182,10 @@ export const updateUser = mutation({
     }
     
     // Check for duplicate phone if updating phone
-    if (fieldsToUpdate.phone) {
+    if (fieldsToUpdate.phone && typeof fieldsToUpdate.phone === "string") {
       const existingPhone = await ctx.db
         .query("users")
-        .withIndex("by_phone", (q) => q.eq("phone", fieldsToUpdate.phone))
+        .withIndex("by_phone", (q) => q.eq("phone", fieldsToUpdate.phone as string))
         .first();
       if (existingPhone && existingPhone._id !== id) {
         throw new Error(
@@ -193,10 +195,10 @@ export const updateUser = mutation({
     }
     
     // Check for duplicate telegram_id if updating telegram_id
-    if (fieldsToUpdate.telegram_id) {
+    if (fieldsToUpdate.telegram_id && typeof fieldsToUpdate.telegram_id === "string") {
       const existingTelegram = await ctx.db
         .query("users")
-        .withIndex("by_telegram_id", (q) => q.eq("telegram_id", fieldsToUpdate.telegram_id))
+        .withIndex("by_telegram_id", (q) => q.eq("telegram_id", fieldsToUpdate.telegram_id as string))
         .first();
       if (existingTelegram && existingTelegram._id !== id) {
         throw new Error(

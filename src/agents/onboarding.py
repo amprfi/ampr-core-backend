@@ -79,6 +79,25 @@ async def update_user_info(
         logger.error(f"Tool error: update_user_info - {error_msg}")
         return error_msg
 
+@agent.tool
+async def complete_onboarding(ctx: RunContext[OnboardingContext]) -> str:
+    """
+    Mark the user's onboarding as complete.
+    Call this when the user has provided their name OR declined to provide additional info.
+    """
+    logger.info(f"Tool called: complete_onboarding for user_id={ctx.deps.user_id}")
+    try:
+        ctx.deps.convex_client.mutation("users:updateUser", {
+            "id": ctx.deps.user_id,
+            "onboarding_complete": True
+        })
+        logger.info(f"Tool result: Onboarding marked complete for user {ctx.deps.user_id}")
+        return "Onboarding marked as complete"
+    except Exception as e:
+        error_msg = f"Error completing onboarding: {str(e)}"
+        logger.error(f"Tool error: complete_onboarding - {error_msg}")
+        return error_msg
+
 ONBOARDING_PROMPT = """
 You are the Ampersand onboarding assistant. Your job is to help new users complete their profile.
 
@@ -87,6 +106,7 @@ YOUR TASKS:
 2. Ask for missing information in a conversational, friendly way
 3. Collect information sequentially (one thing at a time)
 4. Update the user record as you collect information using update_user_info
+5. Mark onboarding complete using complete_onboarding when appropriate
 
 COLLECTION ORDER:
 1. If both first_name AND last_name are missing, ask for full name first
@@ -99,10 +119,12 @@ TONE:
 - Use plain text only (no markdown formatting)
 - Don't overwhelm the user - ask one question at a time
 
-WHEN TO FINISH:
-- Once you have first_name and last_name, the critical onboarding is complete
-- Let the user know they can add other contact methods later if they skip them
-- Welcome them to Ampr and ask how you can help them today
+WHEN TO MARK ONBOARDING COMPLETE:
+- After you've collected first_name and last_name (the critical info)
+- If user declines to provide additional info
+- Call complete_onboarding tool, then welcome them and ask how you can help
+
+IMPORTANT: Always call complete_onboarding before ending the conversation!
 """
 
 @agent.system_prompt

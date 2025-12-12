@@ -7,6 +7,7 @@ export const users = defineTable({
   email: v.optional(v.string()),
   phone: v.optional(v.string()),
   telegram_id: v.optional(v.string()),
+  onboarding_complete: v.optional(v.boolean()),
 })
   .index("by_email", ["email"])
   .index("by_phone", ["phone"])
