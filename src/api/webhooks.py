@@ -43,7 +43,7 @@ from pydantic import BaseModel
 import json
 from aiogram.types import Update as TelegramUpdate
 from aiogram.types import Message as TelegramMessage
-from aiogram.types import Contact
+from aiogram.types import Contact, CallbackQuery
 
 from ..clients.convex_client import get_client
 from ..api.responses import generate_ai_response, ResponseContext
@@ -606,6 +606,13 @@ async def handle_telegram_webhook(request: Request):
         data = await request.json()
         update = TelegramUpdate.model_validate(data)
         
+        # Get Convex client
+        convex_client = get_client()
+        
+        # Handle callback queries (inline keyboard button clicks)
+        if update.callback_query:
+            return await _handle_callback_query(update.callback_query, convex_client)
+        
         # Only handle text messages for now
         if not update.message:
             logger.info("Ignoring non-message update")
@@ -624,9 +631,6 @@ async def handle_telegram_webhook(request: Request):
         logger.info(f"Processing Telegram message from user {telegram_id}: {message_text}")
         logger.info(f"Message has contact: {message.contact is not None}, has text: {message.text is not None}")
         
-        # Get Convex client
-        convex_client = get_client()
-        
         # Check if user shared contact (for linking) - handle BEFORE text check
         if message.contact:
             logger.info(f"Contact detected! Processing contact sharing for user {telegram_id}")
@@ -642,56 +646,19 @@ async def handle_telegram_webhook(request: Request):
         user = convex_client.query("users:getUserByTelegramId", {"telegram_id": telegram_id})
         
         if not user:
-            # User not linked yet - check if they typed a phone number
-            if message.text and message.text.replace('+', '').replace('-', '').replace(' ', '').isdigit():
-                # They typed a phone number - treat it as linking attempt
-                logger.info(f"User {telegram_id} typed phone number for linking: {message.text}")
-                normalized_phone = normalize_phone_number(message.text)
-                
-                try:
-                    result = convex_client.mutation("users:linkTelegramToUser", {
-                        "phone": normalized_phone,
-                        "telegram_id": telegram_id
-                    })
-                    logger.info(f"Successfully linked Telegram ID {telegram_id} to phone {normalized_phone}, user_id: {result}")
-                    
-                    from ..clients.telegram_client import TelegramClient
-                    telegram_client = TelegramClient()
-                    await telegram_client.send_message(
-                        chat_id=int(telegram_id),
-                        text="✅ Your account has been linked! You can now chat with me."
-                    )
-                    await telegram_client.close()
-                    return {"status": "ok", "message": "Linked via typed phone"}
-                    
-                except Exception as e:
-                    logger.error(f"Error linking typed phone {normalized_phone}: {str(e)}", exc_info=True)
-                    from ..clients.telegram_client import TelegramClient
-                    telegram_client = TelegramClient()
-                    await telegram_client.send_message(
-                        chat_id=int(telegram_id),
-                        text=f"❌ Could not link your account. No user found with phone {normalized_phone}."
-                    )
-                    await telegram_client.close()
-                    return {"status": "ok", "message": "Link failed"}
-            
-            # Request phone number
-            logger.info(f"Telegram user {telegram_id} not linked, requesting phone")
-            await _request_phone_number(telegram_id)
-            return {"status": "ok", "message": "Phone requested"}
+            # Show inline keyboard with options
+            logger.info(f"Telegram user {telegram_id} not found, showing options")
+            await _show_user_options(telegram_id)
+            return {"status": "ok", "message": "Options shown"}
         
         user_id = user["_id"]
         logger.info(f"Found linked user: {user_id}")
         
-        # Get or create chat
+        # Get chat (will be auto-created by createMessage if it doesn't exist)
         chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
-        if not chat:
-            logger.error(f"No chat found for user {user_id}")
-            raise ValueError(f"No chat found for user {user_id}")
+        chat_id = chat["_id"] if chat else None
         
-        chat_id = chat["_id"]
-        
-        # Generate AI response (same flow as SMS/web)
+        # Generate AI response (chat will be auto-created in generate_ai_response if needed)
         response_context = ResponseContext(
             message_content=message_text,
             chat_id=chat_id,
@@ -754,29 +721,90 @@ async def _handle_contact_sharing(convex_client, contact: Contact, telegram_id: 
         raise
 
 
-async def _request_phone_number(telegram_id: str):
+async def _show_user_options(telegram_id: str):
     """
-    Request phone number from unlinked Telegram user.
-    Sends a message with a button to share contact.
+    Show inline keyboard with options for new/existing users.
     """
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
     from ..clients.telegram_client import TelegramClient
-    
-    # Create keyboard with contact request button
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📱 Share Phone Number", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
     
     telegram_client = TelegramClient()
     
-    # Send request message
-    await telegram_client.bot.send_message(
+    keyboard = telegram_client.create_inline_keyboard([
+        [{"text": "🆕 I'm new to Ampr", "callback_data": "new_user"}],
+        [{"text": "🔗 Link my existing account", "callback_data": "link_account"}]
+    ])
+    
+    await telegram_client.send_message(
         chat_id=int(telegram_id),
-        text="👋 Welcome! To get started, please share your phone number so I can link your account.",
+        text="👋 Welcome to Ampr! How would you like to get started?",
         reply_markup=keyboard
     )
     
     await telegram_client.close()
-    logger.info(f"Sent phone request to Telegram user {telegram_id}")
+    logger.info(f"Sent user options to Telegram user {telegram_id}")
+
+
+async def _handle_callback_query(callback_query: CallbackQuery, convex_client):
+    """
+    Handle inline keyboard button clicks.
+    """
+    from ..clients.telegram_client import TelegramClient
+    from ..agents.onboarding import get_onboarding_agent, OnboardingContext
+    
+    telegram_id = str(callback_query.from_user.id)
+    callback_data = callback_query.data
+    
+    logger.info(f"Handling callback query from {telegram_id}: {callback_data}")
+    
+    telegram_client = TelegramClient()
+    
+    try:
+        # Answer the callback query to remove loading state
+        await telegram_client.bot.answer_callback_query(callback_query.id)
+        
+        if callback_data == "new_user":
+            # Create new user with just telegram_id
+            logger.info(f"Creating new user with Telegram ID {telegram_id}")
+            user = convex_client.mutation("users:createUser", {
+                "telegram_id": telegram_id
+            })
+            user_id = user["_id"]
+            logger.info(f"Created new user: {user_id}")
+            
+            # Trigger onboarding agent
+            onboarding_agent = get_onboarding_agent()
+            onboarding_context = OnboardingContext(
+                convex_client=convex_client,
+                user_id=user_id,
+                telegram_id=telegram_id
+            )
+            
+            result = await onboarding_agent.run(
+                "I'm a new user to Ampr. Help me get started.",
+                deps=onboarding_context
+            )
+            
+            await telegram_client.send_message(
+                chat_id=int(telegram_id),
+                text=result.output
+            )
+            
+        elif callback_data == "link_account":
+            # For linking, we'll prompt them to provide contact info
+            # Then search for existing user and link telegram_id
+            await telegram_client.send_message(
+                chat_id=int(telegram_id),
+                text="To link your existing account, please provide your phone number or email."
+            )
+        
+        await telegram_client.close()
+        return {"status": "ok", "message": "Callback handled"}
+        
+    except Exception as e:
+        logger.error(f"Error handling callback query: {str(e)}", exc_info=True)
+        await telegram_client.send_message(
+            chat_id=int(telegram_id),
+            text="❌ Something went wrong. Please try again."
+        )
+        await telegram_client.close()
+        return {"status": "error", "message": str(e)}

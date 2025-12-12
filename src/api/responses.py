@@ -25,7 +25,7 @@ class ResponseContext:
 
     Attributes:
         message_content: The content of the user's message
-        chat_id: The ID of the chat
+        chat_id: The ID of the chat (optional, will be auto-created if None)
         channel: The channel (sms, chat, telegram)
         user_id: The ID of the user
         convex_client: Convex client
@@ -35,7 +35,7 @@ class ResponseContext:
     def __init__(
         self,
         message_content: str,
-        chat_id: str,
+        chat_id: Optional[str],
         channel: str,
         user_id: str,
         convex_client: ConvexClient,
@@ -87,7 +87,13 @@ async def generate_ai_response(context: ResponseContext) -> str:
         if preprocessed_message and preprocessed_message != context.message_content:
             message_args["preprocessed_content"] = preprocessed_message
         
-        context.convex_client.mutation("messages:createMessage", message_args)
+        created_message = context.convex_client.mutation("messages:createMessage", message_args)
+        
+        # Get chat_id from created message if not provided (auto-created by createMessage)
+        if not context.chat_id:
+            context.chat_id = created_message["chat"]
+            logger.info(f"Chat auto-created with ID: {context.chat_id}")
+        
         logger.info(f"Stored user message in database for chat {context.chat_id}")
 
         # Check for module triggers (using preprocessed message)

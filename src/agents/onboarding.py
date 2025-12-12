@@ -1,0 +1,113 @@
+from pydantic_ai import Agent, RunContext
+from pydantic import BaseModel, ConfigDict
+from convex import ConvexClient
+from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
+class OnboardingContext(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    convex_client: ConvexClient
+    user_id: str
+    telegram_id: Optional[str] = None
+
+agent = Agent("mistral:mistral-large-latest", deps_type=OnboardingContext)
+
+@agent.tool
+async def get_user_info(ctx: RunContext[OnboardingContext]) -> dict:
+    """
+    Get the current user's information from the database to see what's already filled in.
+    Returns user fields like first_name, last_name, email, phone, telegram_id.
+    """
+    logger.info(f"Tool called: get_user_info for user_id={ctx.deps.user_id}")
+    try:
+        user = ctx.deps.convex_client.query("users:getUser", {"id": ctx.deps.user_id})
+        if not user:
+            raise ValueError(f"User {ctx.deps.user_id} not found")
+        
+        logger.info(f"Tool result: get_user_info returned user data")
+        return {
+            "first_name": user.get("first_name"),
+            "last_name": user.get("last_name"),
+            "email": user.get("email"),
+            "phone": user.get("phone"),
+            "telegram_id": user.get("telegram_id")
+        }
+    except Exception as e:
+        error_msg = f"Error retrieving user info: {str(e)}"
+        logger.error(f"Tool error: get_user_info - {error_msg}")
+        return {"error": error_msg}
+
+@agent.tool
+async def update_user_info(
+    ctx: RunContext[OnboardingContext],
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None
+) -> str:
+    """
+    Update the user's information in the database.
+    Only provide the fields you want to update.
+    Returns success message or error.
+    """
+    logger.info(f"Tool called: update_user_info for user_id={ctx.deps.user_id}")
+    try:
+        update_data = {}
+        if first_name is not None:
+            update_data["first_name"] = first_name
+        if last_name is not None:
+            update_data["last_name"] = last_name
+        if email is not None:
+            update_data["email"] = email
+        if phone is not None:
+            update_data["phone"] = phone
+        
+        if not update_data:
+            return "No fields to update"
+        
+        ctx.deps.convex_client.mutation("users:updateUser", {
+            "id": ctx.deps.user_id,
+            **update_data
+        })
+        
+        logger.info(f"Tool result: update_user_info updated fields: {list(update_data.keys())}")
+        return f"Successfully updated: {', '.join(update_data.keys())}"
+    except Exception as e:
+        error_msg = f"Error updating user info: {str(e)}"
+        logger.error(f"Tool error: update_user_info - {error_msg}")
+        return error_msg
+
+ONBOARDING_PROMPT = """
+You are the Ampersand onboarding assistant. Your job is to help new users complete their profile.
+
+YOUR TASKS:
+1. Check what information we already have using get_user_info
+2. Ask for missing information in a conversational, friendly way
+3. Collect information sequentially (one thing at a time)
+4. Update the user record as you collect information using update_user_info
+
+COLLECTION ORDER:
+1. If both first_name AND last_name are missing, ask for full name first
+2. Then ask for any missing contact channels (phone, email, telegram) - mention these are optional but that Ampr is available wherever they are
+
+TONE:
+- Be warm and welcoming
+- Keep it conversational and brief
+- Don't ask for information we already have
+- Use plain text only (no markdown formatting)
+- Don't overwhelm the user - ask one question at a time
+
+WHEN TO FINISH:
+- Once you have first_name and last_name, the critical onboarding is complete
+- Let the user know they can add other contact methods later if they skip them
+- Welcome them to Ampr and ask how you can help them today
+"""
+
+@agent.system_prompt
+async def get_system_prompt(ctx: RunContext[OnboardingContext]) -> str:
+    return ONBOARDING_PROMPT
+
+def get_onboarding_agent():
+    return agent
