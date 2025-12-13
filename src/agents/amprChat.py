@@ -15,7 +15,11 @@ class TalkerContext(BaseModel):
     convex_client: ConvexClient
     user_id: str
 
-agent = Agent("mistral:mistral-large-latest", deps_type=TalkerContext)
+agent = Agent(
+    "mistral:mistral-large-latest",
+    deps_type=TalkerContext,
+    output_type=List[str]
+)
 
 @agent.tool
 async def get_user_country_tool(ctx: RunContext[TalkerContext]) -> str:
@@ -100,6 +104,11 @@ If there is NO [MODULE RESPONSE] section, you MUST NOT provide:
 - Price or market data on any assets (stocks, bonds, currencies, crypto-tokens)
 - Investment or portfolio recommendations
 
+RESPONSE FORMAT:
+- Return your response as a list of messages
+- You can break up longer responses into multiple messages for a more natural conversation flow
+- Example: ["Here's what I found.", "Bitcoin is currently trading at $50,000."]
+- Each string in the list will be sent as a separate message to the user
 """
 
 @agent.system_prompt

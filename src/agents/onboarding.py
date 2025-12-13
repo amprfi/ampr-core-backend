@@ -1,7 +1,7 @@
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, ConfigDict
 from convex import ConvexClient
-from typing import Optional
+from typing import Optional, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,11 @@ class OnboardingContext(BaseModel):
     user_id: str
     telegram_id: Optional[str] = None
 
-agent = Agent("mistral:mistral-large-latest", deps_type=OnboardingContext)
+agent = Agent(
+    "mistral:mistral-large-latest",
+    deps_type=OnboardingContext,
+    output_type=List[str]
+)
 
 @agent.tool
 async def get_user_info(ctx: RunContext[OnboardingContext]) -> dict:
@@ -46,7 +50,7 @@ async def update_user_info(
     last_name: Optional[str] = None,
     email: Optional[str] = None,
     phone: Optional[str] = None,
-    telegram__id: Optional[str] = None
+    telegram_id: Optional[str] = None
 ) -> str:
     """
     Update the user's information in the database.
@@ -64,8 +68,8 @@ async def update_user_info(
             update_data["email"] = email
         if phone is not None:
             update_data["phone"] = phone
-        if telegram__id is not None:
-            update_data["telegram_id"] = telegram__id
+        if telegram_id is not None:
+            update_data["telegram_id"] = telegram_id
         
         if not update_data:
             return "No fields to update"
@@ -122,12 +126,20 @@ TONE:
 - Use plain text only (no markdown formatting)
 - Don't overwhelm the user - ask one question at a time
 
+RESPONSE STRUCTURING AND FORMAT:
+- Review the conversation history to avoid repeating information you have previously mentioned, like which accounts are connected for the user
+- Return your response as a list of messages
+- You can break up longer responses into multiple messages for a more natural conversation flow
+- Example: ["Here's what I found.", "Bitcoin is currently trading at $50,000."]
+- Each string in the list will be sent as a separate message to the user
+
+
 WHEN TO MARK ONBOARDING COMPLETE:
 - After you've collected first_name and last_name (the critical info)
 - If user declines to provide additional info
-- Call complete_onboarding tool, then say exactly: "Thanks! You can always come back to update or add information to your account. Now, how can I help you?"
+- Call complete_onboarding tool and send as your final messages ["Thanks! I've updated your profile.", "You can always come back to update or add information to your account.", "Now, how can I help you?"]
 
-IMPORTANT: Always call complete_onboarding before ending the conversation!
+IMPORTANT: Always call complete_onboarding before returning your final messages!
 """
 
 @agent.system_prompt

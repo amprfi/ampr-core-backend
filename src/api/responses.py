@@ -51,15 +51,12 @@ class ResponseContext:
         self.phone_number = phone_number
         self.telegram_id = telegram_id
 
-async def generate_ai_response(context: ResponseContext) -> str:
+async def generate_ai_response(context: ResponseContext) -> None:
     """
     Generate an AI response and handle storage and delivery.
 
     Args:
         context: ResponseContext object containing all necessary information
-
-    Returns:
-        The AI response content as a string
 
     Raises:
         Exception: If any step in the process fails
@@ -213,40 +210,43 @@ async def generate_ai_response(context: ResponseContext) -> str:
                 deps=talker_context,
             )
 
-        # Extract the output string from the AgentRunResult
-        response_content = result.output
-        logger.info(f"Generated AI response: {response_content}")
+        # Extract the output from the AgentRunResult
+        # Agents can return either a single string or a list of strings
+        agent_output = result.output
+        response_messages = agent_output if isinstance(agent_output, list) else [agent_output]
+        
+        logger.info(f"Generated AI response: {response_messages}")
 
-        # Store the assistant's response in the database
-        context.convex_client.mutation("messages:createMessage", {
-            "userId": context.user_id,
-            "role": "assistant",
-            "channel": context.channel,
-            "content": response_content
-        })
+        # Store and send each message
+        for response_content in response_messages:
+            # Store the assistant's response in the database
+            context.convex_client.mutation("messages:createMessage", {
+                "userId": context.user_id,
+                "role": "assistant",
+                "channel": context.channel,
+                "content": response_content
+            })
+
+            # For Telegram responses, send the message via Telegram Bot API
+            if context.channel == "telegram" and context.telegram_id:
+                from ..clients.telegram_client import TelegramClient
+                telegram_client = TelegramClient()
+                telegram_result = await telegram_client.send_message(
+                    chat_id=int(context.telegram_id),
+                    text=response_content
+                )
+                await telegram_client.close()
+                
+                if telegram_result:
+                    logger.info(f"Successfully sent Telegram response to {context.telegram_id}")
+                else:
+                    logger.error(f"Failed to send Telegram response to {context.telegram_id}")
 
         logger.info(f"Stored AI response in database for chat {context.chat_id}")
-        
-        # For Telegram responses, send the message via Telegram Bot API
-        if context.channel == "telegram" and context.telegram_id:
-            from ..clients.telegram_client import TelegramClient
-            telegram_client = TelegramClient()
-            telegram_result = await telegram_client.send_message(
-                chat_id=int(context.telegram_id),
-                text=response_content
-            )
-            await telegram_client.close()
-            
-            if telegram_result:
-                logger.info(f"Successfully sent Telegram response to {context.telegram_id}")
-            else:
-                logger.error(f"Failed to send Telegram response to {context.telegram_id}")
         
         # --- MEMORY MANAGEMENT ---
         # Trigger the background memory management process
         await _manage_chat_memory(context.convex_client, context.chat_id, context.user_id)
-
-        return response_content
 
     except Exception as e:
         logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
