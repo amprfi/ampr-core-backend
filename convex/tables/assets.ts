@@ -11,11 +11,19 @@ export const AssetCategory = v.union(
   v.literal("commodity")
 );
 
+/**
+ * Enum validators for native module to provide price feed
+ */
+export const PriceFeed = v.union(
+  v.literal("defianalyst")
+)
+
 export const assets = defineTable({
   ticker: v.optional(v.string()),
   name: v.optional(v.string()),
   liquid: v.boolean(),
   asset_category: AssetCategory,
+  price_feed: v.optional(PriceFeed),
 })
   .index("by_ticker", ["ticker"])
   .index("by_category", ["asset_category"]);

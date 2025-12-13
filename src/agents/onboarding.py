@@ -45,7 +45,8 @@ async def update_user_info(
     first_name: Optional[str] = None,
     last_name: Optional[str] = None,
     email: Optional[str] = None,
-    phone: Optional[str] = None
+    phone: Optional[str] = None,
+    telegram__id: Optional[str] = None
 ) -> str:
     """
     Update the user's information in the database.
@@ -63,6 +64,8 @@ async def update_user_info(
             update_data["email"] = email
         if phone is not None:
             update_data["phone"] = phone
+        if telegram__id is not None:
+            update_data["telegram_id"] = telegram__id
         
         if not update_data:
             return "No fields to update"
@@ -122,7 +125,7 @@ TONE:
 WHEN TO MARK ONBOARDING COMPLETE:
 - After you've collected first_name and last_name (the critical info)
 - If user declines to provide additional info
-- Call complete_onboarding tool, then welcome them and ask how you can help
+- Call complete_onboarding tool, then say exactly: "Thanks! You can always come back to update or add information to your account. Now, how can I help you?"
 
 IMPORTANT: Always call complete_onboarding before ending the conversation!
 """
