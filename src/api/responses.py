@@ -14,6 +14,7 @@ from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
 from ..agents.preprocessor import get_preprocessor_agent, PreprocessorContext
+from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..modules.registry import get_module_registry
 
 # Set up logging
@@ -111,14 +112,9 @@ async def generate_ai_response(context: ResponseContext) -> str:
                 logger.error(error_msg, exc_info=True)
                 module_response = f"ERROR: {error_msg}"
 
-        # Get the talker agent
-        amprChat_agent = get_amprChat_agent()
-
-        # Create the context for the agent
-        talker_context = TalkerContext(
-            convex_client=context.convex_client,
-            user_id=context.user_id
-        )
+        # Check if user needs onboarding
+        user = context.convex_client.query("users:getUser", {"id": context.user_id})
+        needs_onboarding = user and not user.get("onboarding_complete")
 
         # Fetch chat data including messages and summaries
         chat_data = context.convex_client.query("chats:getChat", {
@@ -194,10 +190,28 @@ async def generate_ai_response(context: ResponseContext) -> str:
         """
 
         # Get the agent response with enhanced context
-        result = await amprChat_agent.run(
-            context_str,
-            deps=talker_context,
-        )
+        if needs_onboarding:
+            logger.info(f"User {context.user_id} needs onboarding, using onboarding agent")
+            onboarding_agent = get_onboarding_agent()
+            onboarding_context = OnboardingContext(
+                convex_client=context.convex_client,
+                user_id=context.user_id,
+                telegram_id=context.telegram_id
+            )
+            result = await onboarding_agent.run(
+                context_str,
+                deps=onboarding_context,
+            )
+        else:
+            amprChat_agent = get_amprChat_agent()
+            talker_context = TalkerContext(
+                convex_client=context.convex_client,
+                user_id=context.user_id
+            )
+            result = await amprChat_agent.run(
+                context_str,
+                deps=talker_context,
+            )
 
         # Extract the output string from the AgentRunResult
         response_content = result.output

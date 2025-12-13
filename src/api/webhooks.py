@@ -702,38 +702,11 @@ async def handle_telegram_webhook(request: Request):
         user_id = user["_id"]
         logger.info(f"Found linked user: {user_id}")
         
-        # Check if user needs onboarding
-        if not user.get("onboarding_complete"):
-            logger.info(f"User {user_id} needs onboarding, routing to onboarding agent")
-            from ..clients.telegram_client import TelegramClient
-            from ..agents.onboarding import get_onboarding_agent, OnboardingContext
-            
-            onboarding_agent = get_onboarding_agent()
-            onboarding_context = OnboardingContext(
-                convex_client=convex_client,
-                user_id=user_id,
-                telegram_id=telegram_id
-            )
-            
-            result = await onboarding_agent.run(
-                message_text,
-                deps=onboarding_context
-            )
-            
-            telegram_client = TelegramClient()
-            await telegram_client.send_message(
-                chat_id=int(telegram_id),
-                text=result.output
-            )
-            await telegram_client.close()
-            
-            return {"status": "ok", "message": "Onboarding message processed"}
-        
         # Get chat (will be auto-created by createMessage if it doesn't exist)
         chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
         chat_id = chat["_id"] if chat else None
         
-        # Generate AI response (chat will be auto-created in generate_ai_response if needed)
+        # Generate AI response (handles both onboarding and regular chat)
         response_context = ResponseContext(
             message_content=message_text,
             chat_id=chat_id,
@@ -828,7 +801,6 @@ async def _handle_callback_query(callback_query: CallbackQuery, convex_client):
     Handle inline keyboard button clicks.
     """
     from ..clients.telegram_client import TelegramClient
-    from ..agents.onboarding import get_onboarding_agent, OnboardingContext
     
     telegram_id = str(callback_query.from_user.id)
     callback_data = callback_query.data
@@ -850,23 +822,16 @@ async def _handle_callback_query(callback_query: CallbackQuery, convex_client):
             user_id = user["_id"]
             logger.info(f"Created new user: {user_id}")
             
-            # Trigger onboarding agent
-            onboarding_agent = get_onboarding_agent()
-            onboarding_context = OnboardingContext(
-                convex_client=convex_client,
+            # Use generate_ai_response which will detect onboarding is needed
+            response_context = ResponseContext(
+                message_content="I'm a new user to Ampr. Help me get started.",
+                chat_id=None,
+                channel="telegram",
                 user_id=user_id,
+                convex_client=convex_client,
                 telegram_id=telegram_id
             )
-            
-            result = await onboarding_agent.run(
-                "I'm a new user to Ampr. Help me get started.",
-                deps=onboarding_context
-            )
-            
-            await telegram_client.send_message(
-                chat_id=int(telegram_id),
-                text=result.output
-            )
+            await generate_ai_response(response_context)
             
         elif callback_data == "link_account":
             # For linking, we'll prompt them to provide contact info
