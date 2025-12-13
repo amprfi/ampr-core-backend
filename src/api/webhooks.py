@@ -778,7 +778,7 @@ async def _show_user_options(telegram_id: str):
     telegram_client = TelegramClient()
     
     keyboard = telegram_client.create_inline_keyboard([
-        [{"text": "🆕 I'm new to Ampr", "callback_data": "new_user"}],
+        [{"text": "🆕 I'm new to Ampersand", "callback_data": "new_user"}],
         [{"text": "🔗 Link my existing account", "callback_data": "link_account"}]
     ])
     
@@ -786,7 +786,7 @@ async def _show_user_options(telegram_id: str):
     
     result = await telegram_client.send_message(
         chat_id=int(telegram_id),
-        text="👋 Welcome to Ampr! How would you like to get started?",
+        text="👋 Welcome to Ampersand (alpha), the world's first open financial operating system. I'm Ampr, your financial co-pilot. How would you like to get started?",
         reply_markup=keyboard
     )
     
