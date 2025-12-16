@@ -50,5 +50,8 @@ export const profiles = defineTable({
   inferred_investment_knowledge: v.optional(InvestmentKnowledge),
   inferred_financial_goals: v.optional(v.array(v.string())),
   inferred_investment_thesis: v.optional(v.string()),
+  
+  // Timezone for notification delivery windows (e.g., "America/New_York")
+  timezone: v.optional(v.string()),
 })
   .index("by_user", ["user"]); // For one-to-one lookup

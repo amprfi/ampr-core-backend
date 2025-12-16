@@ -44,6 +44,10 @@ export const messages = defineTable({
   preprocessed_content: v.optional(v.string()), // Preprocessed content (used by agents) - only for user messages
   chat: v.id("chats"),
   status: MessageStatus,
+  // Notification metadata - set when message is a notification
+  is_notification: v.optional(v.boolean()),
+  notification_module: v.optional(v.id("modules")),
+  notification_type: v.optional(v.id("notificationTypes")),
 })
   .index("by_chat", ["chat"]) // Primary query pattern - _creationTime auto-added
   .index("by_chat_status", ["chat", "status"]); // For combined queries - _creationTime auto-added

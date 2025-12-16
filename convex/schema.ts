@@ -4,6 +4,8 @@ import { assets } from "./tables/assets";
 import { profiles } from "./tables/profiles";
 import { portfolioItems } from "./tables/portfolioItems";
 import { chats, messages, summaries } from "./tables/messaging";
+import { modules } from "./tables/modules";
+import { notificationTypes, notificationPreferences, notificationQueue } from "./tables/notifications";
 
 export default defineSchema({
   users,
@@ -13,4 +15,8 @@ export default defineSchema({
   chats,
   messages,
   summaries,
+  modules,
+  notificationTypes,
+  notificationPreferences,
+  notificationQueue,
 });

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { MessageStatus } from "./tables/messaging";
+import { MessageStatus, Channel } from "./tables/messaging";
 
 /**
  * Create a message and auto-create chat if needed
@@ -16,9 +16,12 @@ export const createMessage = mutation({
   args: {
     userId: v.id("users"),
     role: v.string(),
-    channel: v.string(),
+    channel: Channel,
     content: v.string(),
     preprocessed_content: v.optional(v.string()),
+    is_notification: v.optional(v.boolean()),
+    notification_module: v.optional(v.id("modules")),
+    notification_type: v.optional(v.id("notificationTypes")),
   },
   handler: async (ctx, args) => {
     let chat = await ctx.db
@@ -43,6 +46,9 @@ export const createMessage = mutation({
       content: args.content,
       preprocessed_content: args.preprocessed_content,
       status: "Current",
+      is_notification: args.is_notification,
+      notification_module: args.notification_module,
+      notification_type: args.notification_type,
     });
 
     return await ctx.db.get(messageId);
@@ -53,7 +59,8 @@ export const createMessage = mutation({
  * Get messages that need to be summarized
  * 
  * Returns up to 20 messages with status "PendingSummary" for the given chat,
- * ordered by creation time (oldest first)
+ * ordered by creation time (oldest first).
+ * Excludes notification messages from summarization.
  */
 export const getMessagesToSummarize = query({
   args: { chatId: v.id("chats") },
@@ -63,6 +70,7 @@ export const getMessagesToSummarize = query({
       .withIndex("by_chat_status", (q) => 
         q.eq("chat", args.chatId).eq("status", "PendingSummary")
       )
+      .filter((q) => q.neq(q.field("is_notification"), true))
       .take(20);
 
     return messages.map(m => ({
@@ -83,27 +91,31 @@ export const getMessagesToSummarize = query({
  * 3. Returns the count of messages now in "PendingSummary" status
  * 
  * Note: Uses offset 19 because we want messages at position 20+ (0-indexed)
+ * Notification messages are excluded from the count and status updates.
  */
 export const updateMessageStatus = mutation({
   args: { chatId: v.id("chats") },
   handler: async (ctx, args) => {
-    const currentMessages = await ctx.db
+    const allCurrentMessages = await ctx.db
       .query("messages")
       .withIndex("by_chat_status", (q) => 
         q.eq("chat", args.chatId).eq("status", "Current")
       )
       .collect();
 
+    // Filter out notifications for memory management
+    const currentMessages = allCurrentMessages.filter(m => m.is_notification !== true);
     currentMessages.sort((a, b) => b._creationTime - a._creationTime);
 
     if (currentMessages.length <= 19) {
-      const pendingCount = await ctx.db
+      const pendingMessages = await ctx.db
         .query("messages")
         .withIndex("by_chat_status", (q) => 
           q.eq("chat", args.chatId).eq("status", "PendingSummary")
         )
+        .filter((q) => q.neq(q.field("is_notification"), true))
         .collect();
-      return pendingCount.length;
+      return pendingMessages.length;
     }
 
     const cutoffMessage = currentMessages[19];
@@ -120,14 +132,15 @@ export const updateMessageStatus = mutation({
       await ctx.db.patch(message._id, { status: "PendingSummary" });
     }
 
-    const pendingCount = await ctx.db
+    const pendingMessages = await ctx.db
       .query("messages")
       .withIndex("by_chat_status", (q) => 
         q.eq("chat", args.chatId).eq("status", "PendingSummary")
       )
+      .filter((q) => q.neq(q.field("is_notification"), true))
       .collect();
 
-    return pendingCount.length;
+    return pendingMessages.length;
   },
 });
 
