@@ -79,7 +79,7 @@ class NotificationService:
                     error="Notification disabled by user preference"
                 )
             
-            user = self.convex.query("users:getUser", {"id": user_id})
+            user = self.convex.query("users:getUser", {"userId": user_id})
             if not user:
                 return NotificationResult(
                     success=False,
@@ -236,7 +236,7 @@ class NotificationService:
         })
         
         try:
-            user = self.convex.query("users:getUser", {"id": user_id})
+            user = self.convex.query("users:getUser", {"userId": user_id})
             if not user:
                 self.convex.mutation("notifications:updateNotificationStatus", {
                     "id": queue_id,
