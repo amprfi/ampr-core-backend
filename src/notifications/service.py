@@ -87,7 +87,7 @@ class NotificationService:
                     error=f"User {user_id} not found"
                 )
             
-            profile = self.convex.query("profiles:getProfileByUser", {"user": user_id})
+            profile = self.convex.query("profiles:getProfileByUser", {"userId": user_id})
             user_timezone = profile.get("timezone") if profile else None
             user_country = profile.get("country") if profile else None
             
