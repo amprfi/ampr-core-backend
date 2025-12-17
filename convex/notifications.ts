@@ -255,7 +255,7 @@ export const getUserPreferences = query({
 /**
  * Check if notifications are enabled for a user + module + type.
  * Resolution order:
- * 1. User-level preference (global opt-out)
+ * 1. Global opt-out (only blocks if explicitly disabled)
  * 2. Module-level preference
  * 3. Type-level preference
  * 4. Notification type's default_enabled
@@ -267,28 +267,30 @@ export const isNotificationEnabled = query({
     notification_type: v.id("notificationTypes"),
   },
   handler: async (ctx, args) => {
-    // 1. Check user-level preference (global opt-out)
-    const userPref = await ctx.db
+    // Fetch all user preferences and filter in memory to correctly
+    // distinguish global vs module vs type records
+    const allUserPrefs = await ctx.db
       .query("notificationPreferences")
-      .withIndex("by_user_global", (q) =>
-        q.eq("user", args.user)
-      )
-      .first();
+      .withIndex("by_user_global", (q) => q.eq("user", args.user))
+      .collect();
 
-    if (userPref) {
-      return userPref.enabled;
+    // 1. Check global opt-out (no module or notification_type set)
+    // Only short-circuit if explicitly disabled - enabled:true allows overrides
+    const globalPref = allUserPrefs.find(
+      (p) => p.module === undefined && p.notification_type === undefined
+    );
+
+    if (globalPref && globalPref.enabled === false) {
+      return false;
     }
 
-    // 2. Check module-level preference
-    const modulePref = await ctx.db
-      .query("notificationPreferences")
-      .withIndex("by_user_module_type", (q) =>
-        q
-          .eq("user", args.user)
-          .eq("module", args.module)
-          .eq("notification_type", undefined)
-      )
-      .first();
+    // 2. Check module-level preference (has module but no notification_type)
+    const modulePref = allUserPrefs.find(
+      (p) =>
+        p.module !== undefined &&
+        p.module === args.module &&
+        p.notification_type === undefined
+    );
 
     if (modulePref) {
       return modulePref.enabled;
