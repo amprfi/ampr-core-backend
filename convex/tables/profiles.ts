@@ -33,7 +33,7 @@ export const RiskAppetite = v.number();
  */
 export const profiles = defineTable({
   user: v.id("users"),
-  country: v.string(),
+  country: v.id("countries"),
   kyc_passed: v.boolean(),
   age_group: v.optional(AgeGroup),
   

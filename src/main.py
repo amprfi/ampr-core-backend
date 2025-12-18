@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from .api import users
 from .api import webhooks
 from .api import notifications
+from .api import countries
 
 # Configure logging for Railway/production
 logging.basicConfig(
@@ -35,6 +36,8 @@ fast_api.include_router(users.router, prefix="/api")
 fast_api.include_router(webhooks.router, prefix="/api")
 
 fast_api.include_router(notifications.router, prefix="/api")
+
+fast_api.include_router(countries.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():

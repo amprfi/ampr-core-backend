@@ -51,7 +51,7 @@ export const getInvestmentPreferences = query({
 });
 
 /**
- * Get user country
+ * Get user country (resolves the country reference to full country data)
  */
 export const getUserCountry = query({
   args: { userId: v.id("users") },
@@ -65,7 +65,8 @@ export const getUserCountry = query({
       return null;
     }
 
-    return { country: profile.country };
+    const country = await ctx.db.get(profile.country);
+    return { country };
   },
 });
 
@@ -77,7 +78,7 @@ export const getUserCountry = query({
 export const createProfile = mutation({
   args: {
     user: v.id("users"),
-    country: v.string(),
+    country: v.id("countries"),
     kyc_passed: v.boolean(),
     age_group: v.optional(AgeGroup),
     stated_investment_horizon: v.optional(InvestmentHorizon),
@@ -132,7 +133,7 @@ export const createProfile = mutation({
 export const updateProfile = mutation({
   args: {
     user: v.id("users"),
-    country: v.optional(v.string()),
+    country: v.optional(v.id("countries")),
     kyc_passed: v.optional(v.boolean()),
     age_group: v.optional(AgeGroup),
     stated_investment_horizon: v.optional(InvestmentHorizon),

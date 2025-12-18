@@ -6,6 +6,7 @@ import { portfolioItems } from "./tables/portfolioItems";
 import { chats, messages, summaries } from "./tables/messaging";
 import { modules } from "./tables/modules";
 import { notificationTypes, notificationPreferences, notificationQueue } from "./tables/notifications";
+import { countries } from "./tables/countries";
 
 export default defineSchema({
   users,
@@ -19,4 +20,5 @@ export default defineSchema({
   notificationTypes,
   notificationPreferences,
   notificationQueue,
+  countries,
 });

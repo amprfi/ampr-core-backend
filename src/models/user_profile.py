@@ -1,9 +1,8 @@
 from typing import Annotated, List, Literal, Optional
-from pydantic import BaseModel, Field, validator
-from pydantic_extra_types.country import CountryAlpha3
+from pydantic import BaseModel, Field
 
 class UserProfile(BaseModel):
-    country: Optional[CountryAlpha3] = None
+    country: Optional[str] = Field(None, description="Convex ID of the country record")
     kyc_passed: Optional[bool] = False
     stated_risk_appetite: Optional[Annotated[int, Field(ge=1, le=5)]] = None
     stated_investment_horizon: Optional[Literal["1-5", "6-10", "10-20", "20plus"]] = None
