@@ -349,7 +349,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
                 if extracted_profile.inferred_risk_appetite is not None:
                     update_data["inferred_risk_appetite"] = extracted_profile.inferred_risk_appetite
                 if extracted_profile.inferred_investment_knowledge is not None:
-                    update_data["inferred_investment_knowledge"] = extracted_profile.inferred_investment_knowledge
+                    update_data["inferred_investment_knowledge"] = extracted_profile.inferred_investment_knowledge.lower()
                 if extracted_profile.inferred_financial_goals is not None:
                     update_data["inferred_financial_goals"] = extracted_profile.inferred_financial_goals
                 if extracted_profile.inferred_investment_thesis is not None:
