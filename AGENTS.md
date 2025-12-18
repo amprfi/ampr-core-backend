@@ -33,11 +33,11 @@ Ampersand is a complete financial portal combining a web3 wallet, intelligent AI
 
 ### Backend
 - **Framework**: FastAPI
-- **Language**: Python (managed via Poetry)
-- **Database**: GelDB (relational + vector storage)
+- **Language**: Python (managed via Poetry); database managed via TypeScript
+- **Database**: Convex DB (relational + vector storage)
 - **AI Orchestration**: Pydantic AI
 - **LLM Provider**: Mistral (primary)
-- **Communications**: Vonage (SMS & Chat APIs)
+- **Communications**: Telegram + WhatsApp
 
 ### Frontend
 - **Framework**: Svelte/SvelteKit
