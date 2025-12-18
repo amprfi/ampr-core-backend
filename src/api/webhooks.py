@@ -814,13 +814,21 @@ async def _handle_callback_query(callback_query: CallbackQuery, convex_client):
         await telegram_client.bot.answer_callback_query(callback_query.id)
         
         if callback_data == "new_user":
-            # Create new user with just telegram_id
-            logger.info(f"Creating new user with Telegram ID {telegram_id}")
-            user = convex_client.mutation("users:createUser", {
-                "telegram_id": telegram_id
-            })
-            user_id = user["_id"]
-            logger.info(f"Created new user: {user_id}")
+            # Check if user already exists with this telegram_id
+            existing_user = convex_client.query("users:getUserByTelegramId", {"telegram_id": telegram_id})
+            
+            if existing_user:
+                user = existing_user
+                user_id = user["_id"]
+                logger.info(f"Found existing user with Telegram ID {telegram_id}: {user_id}")
+            else:
+                # Create new user with just telegram_id
+                logger.info(f"Creating new user with Telegram ID {telegram_id}")
+                user = convex_client.mutation("users:createUser", {
+                    "telegram_id": telegram_id
+                })
+                user_id = user["_id"]
+                logger.info(f"Created new user: {user_id}")
             
             # Use generate_ai_response which will detect onboarding is needed
             response_context = ResponseContext(

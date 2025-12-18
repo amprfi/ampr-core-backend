@@ -110,7 +110,7 @@ async def generate_ai_response(context: ResponseContext) -> None:
                 module_response = f"ERROR: {error_msg}"
 
         # Check if user needs onboarding
-        user = context.convex_client.query("users:getUser", {"id": context.user_id})
+        user = context.convex_client.query("users:getUser", {"userId": context.user_id})
         needs_onboarding = user and not user.get("onboarding_complete")
 
         # Fetch chat data including messages and summaries

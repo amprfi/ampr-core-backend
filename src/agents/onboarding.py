@@ -26,7 +26,7 @@ async def get_user_info(ctx: RunContext[OnboardingContext]) -> dict:
     """
     logger.info(f"Tool called: get_user_info for user_id={ctx.deps.user_id}")
     try:
-        user = ctx.deps.convex_client.query("users:getUser", {"id": ctx.deps.user_id})
+        user = ctx.deps.convex_client.query("users:getUser", {"userId": ctx.deps.user_id})
         if not user:
             raise ValueError(f"User {ctx.deps.user_id} not found")
         
