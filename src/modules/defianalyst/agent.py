@@ -611,7 +611,8 @@ When answering questions, focus solely on providing the requested market data.
 
 @agent.system_prompt
 def get_system_prompt(ctx: RunContext[DeFiAnalystContext]) -> str:
-    return PROMPT_TEMPLATE
+    today = datetime.now().strftime("%B %d, %Y")
+    return f"Today's date is {today}.\n\n" + PROMPT_TEMPLATE
 
 
 class DeFiAnalystModule(BaseModule):

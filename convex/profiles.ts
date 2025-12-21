@@ -65,7 +65,7 @@ export const getUserCountry = query({
       return null;
     }
 
-    const country = await ctx.db.get(profile.country);
+    const country = profile.country ? await ctx.db.get(profile.country) : null;
     return { country };
   },
 });
@@ -78,7 +78,7 @@ export const getUserCountry = query({
 export const createProfile = mutation({
   args: {
     user: v.id("users"),
-    country: v.id("countries"),
+    country: v.optional(v.id("countries")),
     kyc_passed: v.boolean(),
     age_group: v.optional(AgeGroup),
     stated_investment_horizon: v.optional(InvestmentHorizon),
@@ -148,13 +148,20 @@ export const updateProfile = mutation({
     inferred_investment_thesis: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const profile = await ctx.db
+    let profile = await ctx.db
       .query("profiles")
       .withIndex("by_user", (q) => q.eq("user", args.user))
       .unique();
 
     if (!profile) {
-      throw new Error(`Profile not found for user "${args.user}"`);
+      const profileId = await ctx.db.insert("profiles", {
+        user: args.user,
+        kyc_passed: false,
+      });
+      profile = await ctx.db.get(profileId);
+      if (!profile) {
+        throw new Error(`Failed to create profile for user "${args.user}"`);
+      }
     }
 
     const updates: any = {};

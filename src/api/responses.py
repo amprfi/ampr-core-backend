@@ -51,12 +51,15 @@ class ResponseContext:
         self.phone_number = phone_number
         self.telegram_id = telegram_id
 
-async def generate_ai_response(context: ResponseContext) -> None:
+async def generate_ai_response(context: ResponseContext) -> list[str]:
     """
     Generate an AI response and handle storage and delivery.
 
     Args:
         context: ResponseContext object containing all necessary information
+
+    Returns:
+        list[str]: The generated AI response messages
 
     Raises:
         Exception: If any step in the process fails
@@ -247,6 +250,8 @@ async def generate_ai_response(context: ResponseContext) -> None:
         # --- MEMORY MANAGEMENT ---
         # Trigger the background memory management process
         await _manage_chat_memory(context.convex_client, context.chat_id, context.user_id)
+        
+        return response_messages
 
     except Exception as e:
         logger.error(f"Error generating AI response: {str(e)}", exc_info=True)

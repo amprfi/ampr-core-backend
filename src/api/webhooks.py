@@ -314,8 +314,8 @@ async def handle_rest_message(
             )
 
             # Generate and capture AI response
-            ai_response = await generate_ai_response(response_context)
-            ai_response_container["response"] = ai_response
+            response_messages = await generate_ai_response(response_context)
+            ai_response_container["response"] = response_messages
             logger.info(f"Successfully generated AI response for REST message from {from_number}")
 
         except Exception as e:
