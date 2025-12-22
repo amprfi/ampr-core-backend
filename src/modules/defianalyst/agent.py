@@ -154,7 +154,7 @@ async def get_top_performing_coins(
     timeframe: str = "7d",
     top_n: int = 5,
     direction: str = "gainers",
-    top_coins: str = "500"
+    top_coins: str = "1000"
 ) -> str:
     """
     Get top performing (gainers or losers) cryptocurrencies by timeframe.

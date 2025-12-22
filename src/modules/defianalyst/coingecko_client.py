@@ -214,8 +214,8 @@ class CoinGeckoClient:
     async def get_top_gainers_losers(
         self,
         vs_currency: str = "usd",
-        duration: str = "24h",
-        top_coins: str = "500"
+        duration: str = "7d",
+        top_coins: str = "1000"
     ) -> Dict[str, Any]:
         """
         Get top 30 gainers and losers by time duration (PRO API ONLY).
