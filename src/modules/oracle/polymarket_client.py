@@ -95,33 +95,6 @@ class PolymarketClient:
             logger.error(f"Error fetching Polymarket events: {str(e)}")
             raise
     
-    async def get_event_by_id(self, event_id: int) -> Dict[str, Any]:
-        """
-        Get a specific event by its ID.
-        
-        Args:
-            event_id: The event ID
-            
-        Returns:
-            Event dictionary with full details and markets
-        """
-        try:
-            logger.info(f"Fetching Polymarket event: {event_id}")
-            
-            response = await self.client.get(f"/events/{event_id}")
-            response.raise_for_status()
-            
-            data = response.json()
-            logger.info(f"Successfully fetched event: {data.get('title', event_id)}")
-            return data
-            
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Polymarket API error: {e.response.status_code} - {e.response.text}")
-            raise Exception(f"Failed to fetch event {event_id}: {e.response.status_code}")
-        except Exception as e:
-            logger.error(f"Error fetching Polymarket event: {str(e)}")
-            raise
-    
     async def get_event_by_slug(self, slug: str) -> Dict[str, Any]:
         """
         Get a specific event by its URL slug.
