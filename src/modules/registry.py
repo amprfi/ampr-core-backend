@@ -111,13 +111,14 @@ class ModuleRegistry:
         """
         return self.modules.get(name)
     
-    async def invoke_module(self, name: str, message: str) -> str:
+    async def invoke_module(self, name: str, message: str, date_context: Optional[str] = None) -> str:
         """
         Invoke a module by name with the given message.
         
         Args:
             name: Module name
             message: User message to process
+            date_context: Optional resolved date context from preprocessor
             
         Returns:
             Module response
@@ -130,7 +131,7 @@ class ModuleRegistry:
             raise Exception(f"Module '{name}' not found in registry")
         
         logger.info(f"Invoking module: {name}")
-        return await module.invoke(message)
+        return await module.invoke(message, date_context=date_context)
     
     def list_modules(self) -> List[Dict[str, str]]:
         """
