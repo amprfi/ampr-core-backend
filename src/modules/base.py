@@ -28,12 +28,14 @@ class ModuleInterface(Protocol):
     name: str
     trigger: str
     
-    async def invoke(self, message: str) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
         """
         Process a user message and return a response.
         
         Args:
             message: The full user message (including the @mention trigger)
+            date_context: Optional resolved date context from preprocessor
+                (e.g., '[DATE CONTEXT]\n• "a few weeks ago" = 08-12-2025')
             
         Returns:
             The module's response as a string
@@ -159,12 +161,14 @@ class BaseModule(ABC):
         return result.success
     
     @abstractmethod
-    async def invoke(self, message: str) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
         """
         Process a user message and return a response.
         
         Args:
             message: The full user message (including the @mention trigger)
+            date_context: Optional resolved date context from preprocessor
+                (e.g., '[DATE CONTEXT]\n• "a few weeks ago" = 08-12-2025')
             
         Returns:
             The module's response as a string

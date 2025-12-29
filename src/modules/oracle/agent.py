@@ -212,12 +212,13 @@ class OracleModule(BaseModule):
         from ...clients.convex_client import get_client
         return get_client()
     
-    async def invoke(self, message: str) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
         """
         Process a user message and return prediction market data.
         
         Args:
             message: The full user message (including @oracle mention)
+            date_context: Optional resolved date context from preprocessor
             
         Returns:
             Prediction market data response as a string
@@ -225,12 +226,17 @@ class OracleModule(BaseModule):
         try:
             logger.info(f"Oracle invoked with message: {message}")
             
+            agent_input = message
+            if date_context:
+                agent_input = f"{message}\n\n{date_context}"
+                logger.info(f"Oracle using date context: {date_context}")
+            
             context = OracleContext(
                 polymarket_client=self.polymarket_client,
                 convex_client=self._get_convex_client()
             )
             
-            result = await agent.run(message, deps=context)
+            result = await agent.run(agent_input, deps=context)
             
             response = result.output
             logger.info(f"Oracle response: {response}")

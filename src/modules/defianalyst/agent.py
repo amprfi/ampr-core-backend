@@ -625,12 +625,13 @@ class DeFiAnalystModule(BaseModule):
         super().__init__(name="defianalyst", trigger="@defianalyst")
         self.coingecko_client = CoinGeckoClient()
     
-    async def invoke(self, message: str) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
         """
         Process a user message and return cryptocurrency market data.
         
         Args:
             message: The full user message (including @defianalyst mention)
+            date_context: Optional resolved date context from preprocessor
             
         Returns:
             Market data response as a string
@@ -638,9 +639,14 @@ class DeFiAnalystModule(BaseModule):
         try:
             logger.info(f"DeFiAnalyst invoked with message: {message}")
             
+            agent_input = message
+            if date_context:
+                agent_input = f"{message}\n\n{date_context}"
+                logger.info(f"DeFiAnalyst using date context: {date_context}")
+            
             context = DeFiAnalystContext(coingecko_client=self.coingecko_client)
             
-            result = await agent.run(message, deps=context)
+            result = await agent.run(agent_input, deps=context)
             
             response = result.output
             logger.info(f"DeFiAnalyst response: {response}")

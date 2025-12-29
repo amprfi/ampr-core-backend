@@ -13,7 +13,7 @@ import json
 from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
-from ..agents.preprocessor import get_preprocessor_agent, PreprocessorContext
+from ..agents.preprocessor import get_preprocessor_agent, PreprocessorContext, has_date_references, DateContext
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..modules.registry import get_module_registry
 
@@ -67,26 +67,28 @@ async def generate_ai_response(context: ResponseContext) -> list[str]:
     try:
         logger.info(f"Generating AI response for {context.channel} message in chat {context.chat_id}")
 
-        # Preprocess the message (convert relative dates to explicit dates)
-        preprocessor_agent = get_preprocessor_agent()
-        preprocessor_context = PreprocessorContext()
+        # Conditionally run preprocessor only if message likely contains date references
+        date_context_str = None
+        if has_date_references(context.message_content):
+            logger.info("Date references detected, running preprocessor")
+            preprocessor_agent = get_preprocessor_agent()
+            preprocessor_context = PreprocessorContext()
+            
+            preprocessor_result = await preprocessor_agent.run(context.message_content, deps=preprocessor_context)
+            date_context: DateContext = preprocessor_result.output
+            date_context_str = date_context.to_context_string()
+            
+            logger.info(f"Date context: {date_context_str}")
+        else:
+            logger.info("No date references detected, skipping preprocessor")
         
-        logger.info("Running message preprocessor")
-        preprocessor_result = await preprocessor_agent.run(context.message_content, deps=preprocessor_context)
-        preprocessed_message = preprocessor_result.output
-        
-        logger.info(f"Original message: {context.message_content}")
-        logger.info(f"Preprocessed message: {preprocessed_message}")
-        
-        # Store the user message with both original and preprocessed content
+        # Store the user message
         message_args: dict = {
             "userId": context.user_id,
             "role": "user",
             "channel": context.channel,
             "content": context.message_content,
         }
-        if preprocessed_message and preprocessed_message != context.message_content:
-            message_args["preprocessed_content"] = preprocessed_message
         
         created_message = context.convex_client.mutation("messages:createMessage", message_args)
         
@@ -97,15 +99,19 @@ async def generate_ai_response(context: ResponseContext) -> list[str]:
         
         logger.info(f"Stored user message in database for chat {context.chat_id}")
 
-        # Check for module triggers (using preprocessed message)
+        # Check for module triggers
         module_registry = get_module_registry()
-        module_name = module_registry.detect_module_trigger(preprocessed_message)
+        module_name = module_registry.detect_module_trigger(context.message_content)
         module_response = None
         
         if module_name:
             logger.info(f"Module '{module_name}' detected, invoking module")
             try:
-                module_response = await module_registry.invoke_module(module_name, preprocessed_message)
+                module_response = await module_registry.invoke_module(
+                    module_name, 
+                    context.message_content,
+                    date_context=date_context_str
+                )
                 logger.info(f"Module '{module_name}' returned response")
             except Exception as e:
                 error_msg = f"Module '{module_name}' failed: {str(e)}"
@@ -142,16 +148,17 @@ async def generate_ai_response(context: ResponseContext) -> list[str]:
         for message in recent_messages:
             from datetime import datetime
             timestamp_iso = datetime.fromtimestamp(message["_creationTime"] / 1000).isoformat() if message.get("_creationTime") else None
-            # Use preprocessed_content for agents if available (for user messages), else use content
-            content_for_agent = message.get("preprocessed_content") if message.get("preprocessed_content") else message["content"]
             message_history.append({
                 "role": message["role"],
-                "content": content_for_agent,
+                "content": message["content"],
                 "timestamp": timestamp_iso
             })
 
         # Convert to JSON string for context
         message_history_str = json.dumps(message_history)
+
+        # Build date context section if available
+        date_context_section = f"\n\n        {date_context_str}" if date_context_str else ""
 
         # Create a context string that includes summaries, message history and the current message
         if module_response:
@@ -166,7 +173,7 @@ async def generate_ai_response(context: ResponseContext) -> list[str]:
 
         [CURRENT MESSAGE]
         User message:
-        {preprocessed_message}
+        {context.message_content}{date_context_section}
 
         [MODULE RESPONSE]
         A specialized module has processed this request and returned the following response:
@@ -186,7 +193,7 @@ async def generate_ai_response(context: ResponseContext) -> list[str]:
 
         [CURRENT MESSAGE]
         Current message to respond to:
-        {preprocessed_message}
+        {context.message_content}{date_context_section}
         """
 
         # Get the agent response with enhanced context
