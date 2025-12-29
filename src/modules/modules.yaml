@@ -7,3 +7,9 @@ modules:
     path: "src.modules.defianalyst"
     enabled: true
     description: "Cryptocurrency market data analyst powered by CoinGecko API"
+  
+  - name: "oracle"
+    trigger: "@oracle"
+    path: "src.modules.oracle"
+    enabled: true
+    description: "Prediction markets specialist powered by Polymarket data"

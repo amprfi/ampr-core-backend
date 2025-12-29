@@ -7,6 +7,7 @@ import { chats, messages, summaries } from "./tables/messaging";
 import { modules } from "./tables/modules";
 import { notificationTypes, notificationPreferences, notificationQueue } from "./tables/notifications";
 import { countries } from "./tables/countries";
+import { predictionEvents } from "./tables/predictionEvents";
 
 export default defineSchema({
   users,
@@ -21,4 +22,5 @@ export default defineSchema({
   notificationPreferences,
   notificationQueue,
   countries,
+  predictionEvents,
 });
