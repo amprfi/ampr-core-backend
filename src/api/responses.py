@@ -6,14 +6,14 @@ the storage and delivery of those responses across different channels (SMS, chat
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Sequence
 from convex import ConvexClient
 import json
 
 from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
-from ..agents.preprocessor import get_preprocessor_agent, PreprocessorContext, has_date_references, DateContext
+from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..modules.registry import get_module_registry
 
@@ -51,7 +51,7 @@ class ResponseContext:
         self.phone_number = phone_number
         self.telegram_id = telegram_id
 
-async def generate_ai_response(context: ResponseContext) -> list[str]:
+async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
     """
     Generate an AI response and handle storage and delivery.
 
@@ -67,20 +67,20 @@ async def generate_ai_response(context: ResponseContext) -> list[str]:
     try:
         logger.info(f"Generating AI response for {context.channel} message in chat {context.chat_id}")
 
-        # Conditionally run preprocessor only if message likely contains date references
+        # Conditionally run date preprocessor only if message likely contains date references
         date_context_str = None
         if has_date_references(context.message_content):
-            logger.info("Date references detected, running preprocessor")
-            preprocessor_agent = get_preprocessor_agent()
-            preprocessor_context = PreprocessorContext()
+            logger.info("Date references detected, running date preprocessor")
+            date_preprocessor_agent = get_date_preprocessor_agent()
+            date_preprocessor_context = DatePreprocessorContext()
             
-            preprocessor_result = await preprocessor_agent.run(context.message_content, deps=preprocessor_context)
-            date_context: DateContext = preprocessor_result.output
+            date_preprocessor_result = await date_preprocessor_agent.run(context.message_content, deps=date_preprocessor_context)
+            date_context: DateContext = date_preprocessor_result.output
             date_context_str = date_context.to_context_string()
             
             logger.info(f"Date context: {date_context_str}")
         else:
-            logger.info("No date references detected, skipping preprocessor")
+            logger.info("No date references detected, skipping date preprocessor")
         
         # Store the user message
         message_args: dict = {
@@ -222,7 +222,7 @@ async def generate_ai_response(context: ResponseContext) -> list[str]:
 
         # Extract the output from the AgentRunResult
         # Agents can return either a single string or a list of strings
-        agent_output = result.output
+        agent_output: str | list[str] = result.output
         response_messages = agent_output if isinstance(agent_output, list) else [agent_output]
         
         logger.info(f"Generated AI response: {response_messages}")

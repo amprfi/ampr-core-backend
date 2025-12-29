@@ -44,19 +44,19 @@ class DateContext(BaseModel):
         return "\n".join(lines)
 
 
-class PreprocessorContext(BaseModel):
+class DatePreprocessorContext(BaseModel):
     pass
 
 
 agent = Agent(
     "mistral:mistral-small-latest",
-    deps_type=PreprocessorContext,
+    deps_type=DatePreprocessorContext,
     output_type=DateContext
 )
 
 
 @agent.tool
-async def calculate_date_from_days_ago(ctx: RunContext[PreprocessorContext], days_ago: int) -> str:
+async def calculate_date_from_days_ago(ctx: RunContext[DatePreprocessorContext], days_ago: int) -> str:
     """
     Calculate a date N days ago from today in dd-mm-yyyy format.
     
@@ -79,7 +79,7 @@ async def calculate_date_from_days_ago(ctx: RunContext[PreprocessorContext], day
 
 
 @agent.tool
-async def calculate_date_from_days_ahead(ctx: RunContext[PreprocessorContext], days_ahead: int) -> str:
+async def calculate_date_from_days_ahead(ctx: RunContext[DatePreprocessorContext], days_ahead: int) -> str:
     """
     Calculate a date N days in the future from today in dd-mm-yyyy format.
     
@@ -102,7 +102,7 @@ async def calculate_date_from_days_ahead(ctx: RunContext[PreprocessorContext], d
 
 
 @agent.tool
-async def get_current_date(ctx: RunContext[PreprocessorContext]) -> str:
+async def get_current_date(ctx: RunContext[DatePreprocessorContext]) -> str:
     """
     Get today's date in dd-mm-yyyy format.
     
@@ -166,7 +166,7 @@ Output: DateContext with two references:
 
 
 @agent.system_prompt
-def get_system_prompt(ctx: RunContext[PreprocessorContext]) -> str:
+def get_system_prompt(ctx: RunContext[DatePreprocessorContext]) -> str:
     return PROMPT_TEMPLATE
 
 
@@ -175,5 +175,5 @@ def has_date_references(message: str) -> bool:
     return bool(DATE_PATTERN.search(message))
 
 
-def get_preprocessor_agent():
+def get_date_preprocessor_agent():
     return agent
