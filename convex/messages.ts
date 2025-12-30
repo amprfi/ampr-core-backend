@@ -22,6 +22,7 @@ export const createMessage = mutation({
     is_notification: v.optional(v.boolean()),
     notification_module: v.optional(v.id("modules")),
     notification_type: v.optional(v.id("notificationTypes")),
+    specialist_module: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     let chat = await ctx.db
@@ -49,6 +50,7 @@ export const createMessage = mutation({
       is_notification: args.is_notification,
       notification_module: args.notification_module,
       notification_type: args.notification_type,
+      specialist_module: args.specialist_module,
     });
 
     return await ctx.db.get(messageId);

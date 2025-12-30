@@ -20,6 +20,7 @@ class ModuleRegistry:
     def __init__(self, config_path: Optional[str] = None):
         self.modules: Dict[str, ModuleInterface] = {}
         self.triggers: Dict[str, str] = {}
+        self.metadata: Dict[str, Dict[str, any]] = {}  # Store description, intents per module
         
         if config_path is None:
             config_path = str(Path(__file__).parent / "modules.yaml")
@@ -45,7 +46,9 @@ class ModuleRegistry:
                 self._register_module(
                     name=module_config['name'],
                     trigger=module_config['trigger'],
-                    path=module_config['path']
+                    path=module_config['path'],
+                    description=module_config.get('description', ''),
+                    intents=module_config.get('intents', [])
                 )
             
             logger.info(f"Loaded {len(self.modules)} module(s) from registry")
@@ -55,7 +58,7 @@ class ModuleRegistry:
         except Exception as e:
             logger.error(f"Error loading modules: {str(e)}", exc_info=True)
     
-    def _register_module(self, name: str, trigger: str, path: str):
+    def _register_module(self, name: str, trigger: str, path: str, description: str = "", intents: List[str] = None):
         """
         Register a single module.
         
@@ -63,6 +66,8 @@ class ModuleRegistry:
             name: Module name
             trigger: Trigger string (e.g., "@defianalyst")
             path: Python import path (e.g., "src.modules.defianalyst")
+            description: Human-readable description of the module
+            intents: List of intent keywords the module handles
         """
         try:
             module = import_module(f"{path}.agent")
@@ -76,6 +81,11 @@ class ModuleRegistry:
             
             self.modules[name] = instance
             self.triggers[trigger] = name
+            self.metadata[name] = {
+                "description": description,
+                "intents": intents or [],
+                "trigger": trigger,
+            }
             
             logger.info(f"Registered module: {name} with trigger: {trigger}")
             
@@ -135,15 +145,21 @@ class ModuleRegistry:
     
     def list_modules(self) -> List[Dict[str, str]]:
         """
-        List all registered modules.
+        List all registered modules with metadata.
         
         Returns:
-            List of dictionaries with module info (name, trigger)
+            List of dictionaries with module info (name, trigger, description, intents)
         """
-        return [
-            {"name": module.name, "trigger": module.trigger}
-            for module in self.modules.values()
-        ]
+        result = []
+        for name, module in self.modules.items():
+            meta = self.metadata.get(name, {})
+            result.append({
+                "name": module.name,
+                "trigger": module.trigger,
+                "description": meta.get("description", ""),
+                "intents": meta.get("intents", []),
+            })
+        return result
 
 
 _registry_instance: Optional[ModuleRegistry] = None

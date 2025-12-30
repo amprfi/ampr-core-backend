@@ -197,6 +197,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         """
 
         # Get the agent response with enhanced context
+        talker_context = None  # Track for module attribution
         if needs_onboarding:
             logger.info(f"User {context.user_id} needs onboarding, using onboarding agent")
             onboarding_agent = get_onboarding_agent()
@@ -213,7 +214,10 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             amprChat_agent = get_amprChat_agent()
             talker_context = TalkerContext(
                 convex_client=context.convex_client,
-                user_id=context.user_id
+                user_id=context.user_id,
+                date_context=date_context_str,
+                invoked_modules=[module_name] if module_name else [],
+                module_already_invoked=module_name is not None,
             )
             result = await amprChat_agent.run(
                 context_str,
@@ -227,15 +231,25 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         
         logger.info(f"Generated AI response: {response_messages}")
 
+        # Determine specialist_module from invoked modules (for amprChat path)
+        specialist_module = None
+        if talker_context and talker_context.invoked_modules:
+            specialist_module = talker_context.invoked_modules[0]  # Primary module
+            logger.info(f"Response powered by module: {specialist_module}")
+
         # Store and send each message
         for response_content in response_messages:
             # Store the assistant's response in the database
-            context.convex_client.mutation("messages:createMessage", {
+            message_data: dict = {
                 "userId": context.user_id,
                 "role": "assistant",
                 "channel": context.channel,
                 "content": response_content
-            })
+            }
+            if specialist_module:
+                message_data["specialist_module"] = specialist_module
+            
+            context.convex_client.mutation("messages:createMessage", message_data)
 
             # For Telegram responses, send the message via Telegram Bot API
             if context.channel == "telegram" and context.telegram_id:
