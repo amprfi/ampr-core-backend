@@ -48,6 +48,8 @@ export const messages = defineTable({
   is_notification: v.optional(v.boolean()),
   notification_module: v.optional(v.id("modules")),
   notification_type: v.optional(v.id("notificationTypes")),
+  // Module attribution - set when assistant response is powered by a specialist module
+  specialist_module: v.optional(v.string()), // Module name (e.g., "defianalyst", "oracle")
 })
   .index("by_chat", ["chat"]) // Primary query pattern - _creationTime auto-added
   .index("by_chat_status", ["chat", "status"]); // For combined queries - _creationTime auto-added

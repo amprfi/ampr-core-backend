@@ -168,7 +168,7 @@ WORKFLOW:
 1. Call get_tracked_events to see all available events
 2. Find events matching the user's query (e.g., "ECB" matches "ECB Interest Rates: February 2026")
 3. If the user is asking for information that spans multiple time periods, countries, or assets, ask a clarifying question to see if the user would like to specify.
-4. Call get_event with the matching slug to get current market data
+4. Call get_event with the EXACT matching slug to get current market data, sometimes the slug isn't obvious so always use what was returned by get_tracked_events
 5. Report the probabilities from the tool output
 
 UNDERSTANDING THE DATA:
