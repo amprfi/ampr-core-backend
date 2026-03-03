@@ -26,4 +26,8 @@ export const assets = defineTable({
   price_feed: v.optional(PriceFeed),
 })
   .index("by_ticker", ["ticker"])
-  .index("by_category", ["asset_category"]);
+  .index("by_category", ["asset_category"])
+  .searchIndex("search_name", {
+    searchField: "name",
+    filterFields: ["asset_category"],
+  });

@@ -257,9 +257,24 @@ export const getAsset = query({
 export const getAssetByTicker = query({
   args: { ticker: v.string() },
   handler: async (ctx, args) => {
+    const ticker = args.ticker.toUpperCase();
     return await ctx.db
       .query("assets")
-      .withIndex("by_ticker", (q) => q.eq("ticker", args.ticker))
+      .withIndex("by_ticker", (q) => q.eq("ticker", ticker))
+      .first();
+  },
+});
+
+/**
+ * Search for an asset by name (full-text search).
+ * Returns the best match, if any.
+ */
+export const searchAssetByName = query({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("assets")
+      .withSearchIndex("search_name", (q) => q.search("name", args.name))
       .first();
   },
 });
@@ -281,10 +296,12 @@ export const createAsset = mutation({
     price_feed: v.optional(v.union(v.literal("defianalyst"))),
   },
   handler: async (ctx, args) => {
-    if (args.ticker) {
+    const ticker = args.ticker?.toUpperCase();
+
+    if (ticker) {
       const existing = await ctx.db
         .query("assets")
-        .withIndex("by_ticker", (q) => q.eq("ticker", args.ticker))
+        .withIndex("by_ticker", (q) => q.eq("ticker", ticker))
         .first();
 
       if (existing) {
@@ -292,7 +309,7 @@ export const createAsset = mutation({
       }
     }
 
-    const id = await ctx.db.insert("assets", args);
+    const id = await ctx.db.insert("assets", { ...args, ticker });
     return await ctx.db.get(id);
   },
 });

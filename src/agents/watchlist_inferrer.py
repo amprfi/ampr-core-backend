@@ -1,6 +1,6 @@
 from pydantic_ai import Agent, RunContext
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
 from convex import ConvexClient
 import logging
 
@@ -13,65 +13,56 @@ class WatchlistInferrerContext(BaseModel):
     user_id: str
 
 
-class AssetMention(BaseModel):
-    ticker: str = Field(description="The ticker symbol (e.g., BTC, ETH, AAPL)")
-    name: Optional[str] = Field(None, description="Full name of the asset if mentioned")
-    asset_category: str = Field(
-        description="One of: cryptotoken, stock, currency, commodity"
-    )
-    is_explicit_watch: bool = Field(
-        False,
-        description="True if the user explicitly asked to watch/track/monitor this asset"
-    )
-
-
-class WatchlistInferenceResult(BaseModel):
-    assets_mentioned: List[AssetMention] = Field(
-        default_factory=list,
-        description="List of financial assets mentioned in the message"
-    )
-
-
 agent = Agent(
     "mistral:mistral-small-latest",
     deps_type=WatchlistInferrerContext,
-    output_type=WatchlistInferenceResult,
+    output_type=str,
 )
 
 
 @agent.tool
 async def resolve_and_track_asset(
     ctx: RunContext[WatchlistInferrerContext],
-    ticker: str,
-    name: str,
-    asset_category: str,
     is_explicit_watch: bool,
+    ticker: Optional[str] = None,
+    name: Optional[str] = None,
+    asset_category: Optional[str] = None,
 ) -> str:
     """
-    Resolve an asset by ticker and add it to the user's watchlist.
+    Resolve an asset and add it to the user's watchlist.
     Call this for each financial asset mentioned in the user's message.
+    Provide at least one of ticker or name so the asset can be looked up.
 
     Args:
-        ticker: The ticker symbol (e.g., BTC, ETH, AAPL, EUR)
-        name: Full name of the asset (e.g., Bitcoin, Ethereum, Apple Inc.)
-        asset_category: One of: cryptotoken, stock, currency, commodity
         is_explicit_watch: True if the user explicitly asked to watch/track/monitor this asset
+        ticker: The ticker symbol if known (e.g., BTC, ETH, AAPL, EUR)
+        name: The name of the asset as the user referred to it (e.g., Bitcoin, Apple, Solana)
+        asset_category: One of: cryptotoken, stock, currency, commodity (if known)
     """
+    label = ticker or name or "unknown"
     logger.info(
-        f"Tool called: resolve_and_track_asset ticker={ticker} "
+        f"Tool called: resolve_and_track_asset ticker={ticker} name={name} "
         f"explicit={is_explicit_watch} user={ctx.deps.user_id}"
     )
     try:
         client = ctx.deps.convex_client
 
-        # Look up the asset — if it doesn't exist, skip silently
-        asset = client.query("portfolioItems:getAssetByTicker", {"ticker": ticker.upper()})
+        asset = None
+
+        # 1. Try exact ticker lookup first
+        if ticker:
+            asset = client.query("portfolioItems:getAssetByTicker", {"ticker": ticker.upper()})
+
+        # 2. Fall back to full-text name search
+        if not asset and name:
+            asset = client.query("portfolioItems:searchAssetByName", {"name": name})
 
         if not asset:
-            logger.info(f"Asset {ticker.upper()} not found in database, skipping")
-            return f"Asset {ticker.upper()} not found, skipping"
+            logger.info(f"Asset '{label}' not found in database, skipping")
+            return f"Asset '{label}' not found, skipping"
 
         asset_id = asset["_id"]
+        asset_label = asset.get("ticker") or asset.get("name") or asset_id
 
         # Check current status — never modify owned assets
         existing = client.query("portfolioItems:getPortfolioItem", {
@@ -80,26 +71,26 @@ async def resolve_and_track_asset(
         })
 
         if existing and existing.get("asset_status") == "owned":
-            logger.info(f"Asset {ticker.upper()} is owned, skipping")
-            return f"Asset {ticker.upper()} is already owned, no change"
+            logger.info(f"Asset {asset_label} is owned, skipping")
+            return f"Asset {asset_label} is already owned, no change"
 
         if is_explicit_watch:
             result = client.mutation("portfolioItems:addToWatchlist", {
                 "user": ctx.deps.user_id,
                 "asset": asset_id,
             })
-            logger.info(f"Added stated watch for {ticker.upper()}: {result.get('asset_status')}")
-            return f"Added {ticker.upper()} as stated watch"
+            logger.info(f"Added stated watch for {asset_label}: {result.get('asset_status')}")
+            return f"Added {asset_label} as stated watch"
         else:
             result = client.mutation("portfolioItems:addInferredWatch", {
                 "user": ctx.deps.user_id,
                 "asset": asset_id,
             })
-            logger.info(f"Inferred watch for {ticker.upper()}: {result.get('asset_status')}")
-            return f"Tracked {ticker.upper()} as {result.get('asset_status')}"
+            logger.info(f"Inferred watch for {asset_label}: {result.get('asset_status')}")
+            return f"Tracked {asset_label} as {result.get('asset_status')}"
 
     except Exception as e:
-        error_msg = f"Error tracking asset {ticker}: {str(e)}"
+        error_msg = f"Error tracking asset '{label}': {str(e)}"
         logger.error(f"Tool error: resolve_and_track_asset - {error_msg}")
         return error_msg
 
@@ -109,8 +100,9 @@ You are an asset mention detector for a financial assistant. Your job is to anal
 
 CRITICAL REQUIREMENTS:
 1. Identify ALL financial assets mentioned in the message (cryptocurrencies, stocks, currencies, commodities).
-2. For each asset found, call resolve_and_track_asset to register it.
+2. For each asset found, call resolve_and_track_asset with whatever you know — ticker, name, or both. Provide at least one.
 3. Determine if the mention is an EXPLICIT watch request or just a casual mention.
+4. Pass the name exactly as the user referred to it — the system handles fuzzy matching.
 
 EXPLICIT WATCH INDICATORS (is_explicit_watch = True):
 - "Watch this for me"
@@ -135,8 +127,9 @@ ASSET CATEGORIES:
 - currency: USD, EUR, GBP, etc.
 - commodity: Gold (XAU), Silver (XAG), Oil (WTI), etc.
 
-If no financial assets are mentioned, return an empty assets_mentioned list.
+If no financial assets are mentioned, do not call any tools.
 Do NOT fabricate assets that weren't mentioned.
+After processing, respond with a short summary of what you tracked (e.g. "Tracked BTC, ETH" or "No assets mentioned").
 """
 
 

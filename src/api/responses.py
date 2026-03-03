@@ -5,6 +5,7 @@ This module provides a unified interface for generating AI responses and handlin
 the storage and delivery of those responses across different channels (SMS, chat).
 """
 
+import asyncio
 import logging
 from typing import Optional, Sequence
 from convex import ConvexClient
@@ -99,6 +100,11 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             logger.info(f"Chat auto-created with ID: {context.chat_id}")
 
         logger.info(f"Stored user message in database for chat {context.chat_id}")
+
+        # Fire-and-forget watchlist inference (non-blocking)
+        asyncio.create_task(
+            _infer_watchlist(context.convex_client, context.user_id, context.message_content)
+        )
 
         # Check for module triggers
         module_registry = get_module_registry()
@@ -278,6 +284,19 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
     except Exception as e:
         logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
         raise
+
+async def _infer_watchlist(convex_client: ConvexClient, user_id: str, message: str):
+    """
+    Run the watchlist inferrer agent to detect asset mentions in the user's message.
+    Fire-and-forget — errors are logged but never propagated.
+    """
+    try:
+        agent = get_watchlist_inferrer_agent()
+        deps = WatchlistInferrerContext(convex_client=convex_client, user_id=user_id)
+        await agent.run(message, deps=deps)
+    except Exception as e:
+        logger.error(f"Watchlist inference failed for user {user_id}: {str(e)}", exc_info=True)
+
 
 async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id: str):
     """
