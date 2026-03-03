@@ -5,6 +5,7 @@ import { v } from "convex/values";
  * Enum validators for asset status
  */
 export const AssetStatus = v.union(
+  v.literal("pending inferred watch"),
   v.literal("inferred watch"),
   v.literal("stated watch"),
   v.literal("owned")

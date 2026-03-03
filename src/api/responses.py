@@ -15,6 +15,7 @@ from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
 from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
+from ..agents.watchlist_inferrer import get_watchlist_inferrer_agent, WatchlistInferrerContext
 from ..modules.registry import get_module_registry
 
 # Set up logging
@@ -73,15 +74,15 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             logger.info("Date references detected, running date preprocessor")
             date_preprocessor_agent = get_date_preprocessor_agent()
             date_preprocessor_context = DatePreprocessorContext()
-            
+
             date_preprocessor_result = await date_preprocessor_agent.run(context.message_content, deps=date_preprocessor_context)
             date_context: DateContext = date_preprocessor_result.output
             date_context_str = date_context.to_context_string()
-            
+
             logger.info(f"Date context: {date_context_str}")
         else:
             logger.info("No date references detected, skipping date preprocessor")
-        
+
         # Store the user message
         message_args: dict = {
             "userId": context.user_id,
@@ -89,26 +90,26 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             "channel": context.channel,
             "content": context.message_content,
         }
-        
+
         created_message = context.convex_client.mutation("messages:createMessage", message_args)
-        
+
         # Get chat_id from created message if not provided (auto-created by createMessage)
         if not context.chat_id:
             context.chat_id = created_message["chat"]
             logger.info(f"Chat auto-created with ID: {context.chat_id}")
-        
+
         logger.info(f"Stored user message in database for chat {context.chat_id}")
 
         # Check for module triggers
         module_registry = get_module_registry()
         module_name = module_registry.detect_module_trigger(context.message_content)
         module_response = None
-        
+
         if module_name:
             logger.info(f"Module '{module_name}' detected, invoking module")
             try:
                 module_response = await module_registry.invoke_module(
-                    module_name, 
+                    module_name,
                     context.message_content,
                     date_context=date_context_str
                 )
@@ -144,7 +145,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         # Process Recent Messages (Oldest to Newest)
         message_history = []
         recent_messages = chat_data.get("recent_messages", [])
-        
+
         for message in recent_messages:
             from datetime import datetime
             timestamp_iso = datetime.fromtimestamp(message["_creationTime"] / 1000).isoformat() if message.get("_creationTime") else None
@@ -228,7 +229,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         # Agents can return either a single string or a list of strings
         agent_output: str | list[str] = result.output
         response_messages = agent_output if isinstance(agent_output, list) else [agent_output]
-        
+
         logger.info(f"Generated AI response: {response_messages}")
 
         # Determine specialist_module from invoked modules (for amprChat path)
@@ -248,7 +249,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             }
             if specialist_module:
                 message_data["specialist_module"] = specialist_module
-            
+
             context.convex_client.mutation("messages:createMessage", message_data)
 
             # For Telegram responses, send the message via Telegram Bot API
@@ -260,18 +261,18 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                     text=response_content
                 )
                 await telegram_client.close()
-                
+
                 if telegram_result:
                     logger.info(f"Successfully sent Telegram response to {context.telegram_id}")
                 else:
                     logger.error(f"Failed to send Telegram response to {context.telegram_id}")
 
         logger.info(f"Stored AI response in database for chat {context.chat_id}")
-        
+
         # --- MEMORY MANAGEMENT ---
         # Trigger the background memory management process
         await _manage_chat_memory(context.convex_client, context.chat_id, context.user_id)
-        
+
         return response_messages
 
     except Exception as e:
@@ -292,18 +293,18 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
         pending_count = convex_client.mutation("messages:updateMessageStatus", {
             "chatId": chat_id
         })
-        
+
         logger.info(f"Memory Management: Chat {chat_id} has {pending_count} pending messages.")
 
         # Step 2: Trigger Summarization if threshold met
         if pending_count >= 20:
             logger.info(f"Triggering summarization for chat {chat_id}")
-            
+
             # Fetch the messages to summarize
             messages_to_summarize = convex_client.query("messages:getMessagesToSummarize", {
                 "chatId": chat_id
             })
-            
+
             if not messages_to_summarize:
                 logger.warning("Pending count was high but no messages returned for summarization.")
                 return
@@ -311,7 +312,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
             # Prepare content for summarizer
             text_lines = []
             message_ids = []
-            
+
             # Capture time range
             start_msg = messages_to_summarize[0]
             end_msg = messages_to_summarize[-1]
@@ -322,43 +323,43 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
 
             range_start = start_msg["_creationTime"]
             range_end = end_msg["_creationTime"]
-            
+
             from datetime import datetime
             for msg in messages_to_summarize:
                 ts_ms = msg.get("_creationTime")
                 ts = datetime.fromtimestamp(ts_ms / 1000).isoformat() if ts_ms else "UNKNOWN"
                 text_lines.append(f"[{ts}] {msg['role'].upper()}: {msg['content']}")
                 message_ids.append(msg["_id"])
-                
+
             conversation_text = "\n".join(text_lines)
-            
+
             # Run Summarizer Agent
             summarizer_agent = get_summarizer_agent()
             summarizer_ctx = SummarizerContext()
-            
+
             summary_result = await summarizer_agent.run(
                 f"Please summarize these messages:\n\n{conversation_text}",
                 deps=summarizer_ctx
             )
-            
+
             summary_content = summary_result.output
             logger.info(f"Generated summary for chat {chat_id}: {summary_content[:50]}...")
-            
+
             # Run Extractor Agent
             extractor_agent = get_extractor_agent()
             extractor_ctx = ExtractorContext(
                 convex_client=convex_client,
                 user_id=user_id
             )
-            
+
             extraction_result = await extractor_agent.run(
                 f"Extract user profile information from these messages:\n\n{conversation_text}",
                 deps=extractor_ctx
             )
-            
+
             extracted_profile = extraction_result.output
             logger.info(f"Extracted profile data for user {user_id}")
-            
+
             # Update user profile if any non-null values were extracted
             has_updates = any([
                 extracted_profile.inferred_investment_horizon is not None,
@@ -367,7 +368,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
                 extracted_profile.inferred_financial_goals is not None,
                 extracted_profile.inferred_investment_thesis is not None
             ])
-            
+
             if has_updates:
                 update_data = {}
                 if extracted_profile.inferred_investment_horizon is not None:
@@ -380,7 +381,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
                     update_data["inferred_financial_goals"] = extracted_profile.inferred_financial_goals
                 if extracted_profile.inferred_investment_thesis is not None:
                     update_data["inferred_investment_thesis"] = extracted_profile.inferred_investment_thesis
-                
+
                 convex_client.mutation("profiles:updateProfile", {
                     "user": user_id,
                     **update_data
@@ -388,7 +389,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
                 logger.info(f"Updated user profile for user {user_id} with extracted data")
             else:
                 logger.info(f"No profile updates extracted for user {user_id}")
-            
+
             # Save Summary and Archive Messages
             convex_client.mutation("messages:createSummaryAndArchive", {
                 "chatId": chat_id,
@@ -397,7 +398,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
                 "range_end": range_end,
                 "messageIds": message_ids
             })
-            
+
             logger.info(f"Successfully archived {len(message_ids)} messages for chat {chat_id}")
 
     except Exception as e:

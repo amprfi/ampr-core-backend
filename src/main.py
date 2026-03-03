@@ -12,6 +12,7 @@ from .api import users
 from .api import webhooks
 from .api import notifications
 from .api import countries
+from .api import watchlist
 
 # Configure logging for Railway/production
 logging.basicConfig(
@@ -38,6 +39,8 @@ fast_api.include_router(webhooks.router, prefix="/api")
 fast_api.include_router(notifications.router, prefix="/api")
 
 fast_api.include_router(countries.router, prefix="/api")
+
+fast_api.include_router(watchlist.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():

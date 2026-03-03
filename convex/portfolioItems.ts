@@ -1,0 +1,298 @@
+import { v } from "convex/values";
+import { mutation, query } from "./_generated/server";
+import { AssetStatus } from "./tables/portfolioItems";
+
+// ============================================================================
+// QUERIES
+// ============================================================================
+
+/**
+ * Get all portfolio items for a user, with resolved asset details.
+ */
+export const getPortfolioByUser = query({
+  args: { user: v.id("users") },
+  handler: async (ctx, args) => {
+    const items = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user", (q) => q.eq("user", args.user))
+      .collect();
+
+    const enriched = await Promise.all(
+      items.map(async (item) => {
+        const asset = await ctx.db.get(item.asset);
+        return { ...item, asset_details: asset };
+      })
+    );
+
+    return enriched;
+  },
+});
+
+/**
+ * Get watchlist items for a user (stated watch + inferred watch only).
+ */
+export const getWatchlist = query({
+  args: { user: v.id("users") },
+  handler: async (ctx, args) => {
+    const items = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user", (q) => q.eq("user", args.user))
+      .collect();
+
+    const watchItems = items.filter(
+      (item) =>
+        item.asset_status === "stated watch" ||
+        item.asset_status === "inferred watch"
+    );
+
+    const enriched = await Promise.all(
+      watchItems.map(async (item) => {
+        const asset = await ctx.db.get(item.asset);
+        return { ...item, asset_details: asset };
+      })
+    );
+
+    return enriched;
+  },
+});
+
+/**
+ * Get owned assets for a user.
+ */
+export const getOwnedAssets = query({
+  args: { user: v.id("users") },
+  handler: async (ctx, args) => {
+    const items = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_status", (q) =>
+        q.eq("user", args.user).eq("asset_status", "owned")
+      )
+      .collect();
+
+    const enriched = await Promise.all(
+      items.map(async (item) => {
+        const asset = await ctx.db.get(item.asset);
+        return { ...item, asset_details: asset };
+      })
+    );
+
+    return enriched;
+  },
+});
+
+/**
+ * Get a single portfolio item by user and asset.
+ */
+export const getPortfolioItem = query({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+  },
+});
+
+// ============================================================================
+// MUTATIONS
+// ============================================================================
+
+/**
+ * Add an asset to the user's watchlist.
+ * - If no existing item, creates with "stated watch".
+ * - If existing "pending inferred watch" or "inferred watch", upgrades to "stated watch".
+ * - If already "stated watch" or "owned", no-op (returns existing).
+ */
+export const addToWatchlist = mutation({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+
+    if (existing) {
+      if (
+        existing.asset_status === "pending inferred watch" ||
+        existing.asset_status === "inferred watch"
+      ) {
+        await ctx.db.patch(existing._id, { asset_status: "stated watch" });
+        return { ...existing, asset_status: "stated watch" };
+      }
+      return existing;
+    }
+
+    const id = await ctx.db.insert("portfolioItems", {
+      user: args.user,
+      asset: args.asset,
+      asset_status: "stated watch",
+    });
+
+    return await ctx.db.get(id);
+  },
+});
+
+/**
+ * Add an inferred watch (called by AI when user mentions an asset).
+ * Two-step promotion:
+ * - If no existing item, creates with "pending inferred watch".
+ * - If existing "pending inferred watch", upgrades to "inferred watch".
+ * - If already "inferred watch", "stated watch", or "owned", no-op.
+ */
+export const addInferredWatch = mutation({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+
+    if (existing) {
+      if (existing.asset_status === "pending inferred watch") {
+        await ctx.db.patch(existing._id, { asset_status: "inferred watch" });
+        return { ...existing, asset_status: "inferred watch" };
+      }
+      return existing;
+    }
+
+    const id = await ctx.db.insert("portfolioItems", {
+      user: args.user,
+      asset: args.asset,
+      asset_status: "pending inferred watch",
+    });
+
+    return await ctx.db.get(id);
+  },
+});
+
+/**
+ * Remove an asset from the watchlist.
+ * - Deletes items with "pending inferred watch", "inferred watch", or "stated watch" status.
+ * - Does NOT delete "owned" items.
+ */
+export const removeFromWatchlist = mutation({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+
+    if (!existing) {
+      throw new Error("Portfolio item not found");
+    }
+
+    if (existing.asset_status === "owned") {
+      throw new Error("Cannot remove an owned asset from watchlist");
+    }
+
+    await ctx.db.delete(existing._id);
+    return true;
+  },
+});
+
+/**
+ * Update the status of a portfolio item.
+ */
+export const updateAssetStatus = mutation({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+    asset_status: AssetStatus,
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+
+    if (!existing) {
+      throw new Error("Portfolio item not found");
+    }
+
+    await ctx.db.patch(existing._id, { asset_status: args.asset_status });
+    return await ctx.db.get(existing._id);
+  },
+});
+
+// ============================================================================
+// ASSETS
+// ============================================================================
+
+/**
+ * Get an asset by ID.
+ */
+export const getAsset = query({
+  args: { id: v.id("assets") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
+  },
+});
+
+/**
+ * Get an asset by ticker symbol.
+ */
+export const getAssetByTicker = query({
+  args: { ticker: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("assets")
+      .withIndex("by_ticker", (q) => q.eq("ticker", args.ticker))
+      .first();
+  },
+});
+
+/**
+ * Create an asset (if it doesn't already exist by ticker).
+ */
+export const createAsset = mutation({
+  args: {
+    ticker: v.optional(v.string()),
+    name: v.optional(v.string()),
+    liquid: v.boolean(),
+    asset_category: v.union(
+      v.literal("cryptotoken"),
+      v.literal("stock"),
+      v.literal("currency"),
+      v.literal("commodity")
+    ),
+    price_feed: v.optional(v.union(v.literal("defianalyst"))),
+  },
+  handler: async (ctx, args) => {
+    if (args.ticker) {
+      const existing = await ctx.db
+        .query("assets")
+        .withIndex("by_ticker", (q) => q.eq("ticker", args.ticker))
+        .first();
+
+      if (existing) {
+        return existing;
+      }
+    }
+
+    const id = await ctx.db.insert("assets", args);
+    return await ctx.db.get(id);
+  },
+});
