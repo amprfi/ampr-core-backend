@@ -8,7 +8,6 @@ Provides endpoints for:
 """
 
 import logging
-from typing import Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
@@ -33,15 +32,6 @@ class RemoveFromWatchlistRequest(BaseModel):
     """Request body for removing an asset from watchlist."""
     user_id: str
     asset_id: str
-
-
-class CreateAssetRequest(BaseModel):
-    """Request body for creating a new asset."""
-    ticker: Optional[str] = None
-    name: Optional[str] = None
-    liquid: bool = True
-    asset_category: str  # cryptotoken, stock, currency, commodity
-    price_feed: Optional[str] = None
 
 
 class UpdateAssetStatusRequest(BaseModel):
@@ -176,61 +166,4 @@ async def update_asset_status(request: UpdateAssetStatusRequest):
         )
 
 
-# ============================================================================
-# ASSET ENDPOINTS
-# ============================================================================
 
-@router.get("/asset/ticker/{ticker}")
-async def get_asset_by_ticker(ticker: str):
-    """Look up an asset by its ticker symbol."""
-    try:
-        convex_client = get_client()
-        asset = convex_client.query("portfolioItems:getAssetByTicker", {
-            "ticker": ticker,
-        })
-        if not asset:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Asset with ticker '{ticker}' not found",
-            )
-        return {"asset": asset}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching asset: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )
-
-
-@router.post("/asset/create")
-async def create_asset(request: CreateAssetRequest):
-    """
-    Create a new asset.
-    
-    If an asset with the same ticker already exists, returns the existing one.
-    """
-    try:
-        convex_client = get_client()
-        args: dict = {
-            "liquid": request.liquid,
-            "asset_category": request.asset_category,
-        }
-        if request.ticker is not None:
-            args["ticker"] = request.ticker
-        if request.name is not None:
-            args["name"] = request.name
-        if request.price_feed is not None:
-            args["price_feed"] = request.price_feed
-
-        result = convex_client.mutation("portfolioItems:createAsset", args)
-        return {"asset": result}
-
-    except Exception as e:
-        logger.error(f"Error creating asset: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        )

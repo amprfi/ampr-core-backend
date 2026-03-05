@@ -291,9 +291,11 @@ async def _infer_watchlist(convex_client: ConvexClient, user_id: str, message: s
     Fire-and-forget — errors are logged but never propagated.
     """
     try:
+        logger.info(f"Watchlist inferrer starting for user {user_id}: {message!r}")
         agent = get_watchlist_inferrer_agent()
         deps = WatchlistInferrerContext(convex_client=convex_client, user_id=user_id)
-        await agent.run(message, deps=deps)
+        result = await agent.run(message, deps=deps)
+        logger.info(f"Watchlist inferrer completed for user {user_id}: {result.output}")
     except Exception as e:
         logger.error(f"Watchlist inference failed for user {user_id}: {str(e)}", exc_info=True)
 

@@ -24,24 +24,20 @@ agent = Agent(
 async def resolve_and_track_asset(
     ctx: RunContext[WatchlistInferrerContext],
     is_explicit_watch: bool,
-    ticker: Optional[str] = None,
-    name: Optional[str] = None,
+    query: str,
     asset_category: Optional[str] = None,
 ) -> str:
     """
     Resolve an asset and add it to the user's watchlist.
     Call this for each financial asset mentioned in the user's message.
-    Provide at least one of ticker or name so the asset can be looked up.
 
     Args:
         is_explicit_watch: True if the user explicitly asked to watch/track/monitor this asset
-        ticker: The ticker symbol if known (e.g., BTC, ETH, AAPL, EUR)
-        name: The name of the asset as the user referred to it (e.g., Bitcoin, Apple, Solana)
+        query: The asset's ticker symbol or name as mentioned by the user (e.g., BTC, Bitcoin, XCH, Solana)
         asset_category: One of: cryptotoken, stock, currency, commodity (if known)
     """
-    label = ticker or name or "unknown"
     logger.info(
-        f"Tool called: resolve_and_track_asset ticker={ticker} name={name} "
+        f"Tool called: resolve_and_track_asset query={query} "
         f"explicit={is_explicit_watch} user={ctx.deps.user_id}"
     )
     try:
@@ -49,17 +45,16 @@ async def resolve_and_track_asset(
 
         asset = None
 
-        # 1. Try exact ticker lookup first
-        if ticker:
-            asset = client.query("portfolioItems:getAssetByTicker", {"ticker": ticker.upper()})
+        # 1. Try exact ticker lookup
+        asset = client.query("portfolioItems:getAssetByTicker", {"ticker": query.upper()})
 
         # 2. Fall back to full-text name search
-        if not asset and name:
-            asset = client.query("portfolioItems:searchAssetByName", {"name": name})
+        if not asset:
+            asset = client.query("portfolioItems:searchAssetByName", {"name": query})
 
         if not asset:
-            logger.info(f"Asset '{label}' not found in database, skipping")
-            return f"Asset '{label}' not found, skipping"
+            logger.info(f"Asset '{query}' not found in database, skipping")
+            return f"Asset '{query}' not found, skipping"
 
         asset_id = asset["_id"]
         asset_label = asset.get("ticker") or asset.get("name") or asset_id
@@ -90,19 +85,18 @@ async def resolve_and_track_asset(
             return f"Tracked {asset_label} as {result.get('asset_status')}"
 
     except Exception as e:
-        error_msg = f"Error tracking asset '{label}': {str(e)}"
+        error_msg = f"Error tracking asset '{query}': {str(e)}"
         logger.error(f"Tool error: resolve_and_track_asset - {error_msg}")
         return error_msg
 
 
 PROMPT_TEMPLATE = """
-You are an asset mention detector for a financial assistant. Your job is to analyze user messages and identify any financial assets mentioned.
+Your only job is to watch user messages and identify any financial assets mentioned. Your purpose is to notice these mentions, you do not need to answer any questions or provide information back to the user. Watch for stocks, crypto-assets, commodities, and currencies. Pay close attention to anything that may look like a ticker symbol.
 
 CRITICAL REQUIREMENTS:
 1. Identify ALL financial assets mentioned in the message (cryptocurrencies, stocks, currencies, commodities).
-2. For each asset found, call resolve_and_track_asset with whatever you know — ticker, name, or both. Provide at least one.
+2. For each asset found, call resolve_and_track_asset with the ticker symbol or name as the query. Prefer ticker symbols when known (e.g., "BTC" not "Bitcoin").
 3. Determine if the mention is an EXPLICIT watch request or just a casual mention.
-4. Pass the name exactly as the user referred to it — the system handles fuzzy matching.
 
 EXPLICIT WATCH INDICATORS (is_explicit_watch = True):
 - "Watch this for me"
