@@ -4,7 +4,45 @@ from typing import Optional
 from convex import ConvexClient
 import logging
 
+from ..modules.defianalyst.coingecko_client import CoinGeckoClient
+
 logger = logging.getLogger(__name__)
+
+# Cached CoinGecko coins list for resolving external IDs
+_coingecko_coins_cache: Optional[list[dict]] = None
+
+
+async def _get_coingecko_coins() -> list[dict]:
+    """Fetch and cache the CoinGecko coins list."""
+    global _coingecko_coins_cache
+    if _coingecko_coins_cache is None:
+        async with CoinGeckoClient() as client:
+            _coingecko_coins_cache = await client.get_coins_list()
+    return _coingecko_coins_cache
+
+
+def _resolve_coingecko_id(coins_list: list[dict], ticker: str | None, name: str | None) -> str | None:
+    """
+    Resolve a CoinGecko coin ID from a ticker or name.
+    Tries exact ticker match first, then exact name match.
+    """
+    if not ticker and not name:
+        return None
+
+    ticker_lower = ticker.lower() if ticker else None
+    name_lower = name.lower() if name else None
+
+    for coin in coins_list:
+        coin_symbol = coin.get("symbol", "").lower()
+        coin_name = coin.get("name", "").lower()
+        coin_id = coin.get("id", "")
+
+        if ticker_lower and coin_symbol == ticker_lower:
+            return coin_id
+        if name_lower and coin_name == name_lower:
+            return coin_id
+
+    return None
 
 
 class WatchlistInferrerContext(BaseModel):
@@ -46,11 +84,11 @@ async def resolve_and_track_asset(
         asset = None
 
         # 1. Try exact ticker lookup
-        asset = client.query("portfolioItems:getAssetByTicker", {"ticker": query.upper()})
+        asset = client.query("assets:getAssetByTicker", {"ticker": query.upper()})
 
         # 2. Fall back to full-text name search
         if not asset:
-            asset = client.query("portfolioItems:searchAssetByName", {"name": query})
+            asset = client.query("assets:searchAssetByName", {"name": query})
 
         if not asset:
             logger.info(f"Asset '{query}' not found in database, skipping")
@@ -58,6 +96,29 @@ async def resolve_and_track_asset(
 
         asset_id = asset["_id"]
         asset_label = asset.get("ticker") or asset.get("name") or asset_id
+
+        # Ensure a priceFeedMapping exists for crypto assets
+        if asset.get("asset_category") == "cryptotoken" and asset.get("price_feed") == "defianalyst":
+            existing_mappings = client.query(
+                "priceFeedMappings:getMappingsByAsset", {"asset": asset_id}
+            )
+            if not existing_mappings:
+                try:
+                    coins_list = await _get_coingecko_coins()
+                    coingecko_id = _resolve_coingecko_id(
+                        coins_list, asset.get("ticker"), asset.get("name")
+                    )
+                    if coingecko_id:
+                        client.mutation("priceFeedMappings:upsertMapping", {
+                            "asset": asset_id,
+                            "price_feed": "defianalyst",
+                            "external_id": coingecko_id,
+                        })
+                        logger.info(f"Created priceFeedMapping for {asset_label} -> {coingecko_id}")
+                    else:
+                        logger.warning(f"Could not resolve CoinGecko ID for {asset_label}")
+                except Exception as e:
+                    logger.error(f"Error creating priceFeedMapping for {asset_label}: {e}")
 
         # Check current status — never modify owned assets
         existing = client.query("portfolioItems:getPortfolioItem", {

@@ -160,6 +160,12 @@ class NotificationService:
         
         if not delivery_success:
             logger.error(f"Failed to deliver notification to user {user_id} via {channel}")
+            return NotificationResult(
+                success=False,
+                delivered=False,
+                message_id=message_id,
+                error=f"Delivery via {channel} failed",
+            )
         
         return NotificationResult(
             success=True,

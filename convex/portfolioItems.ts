@@ -98,6 +98,27 @@ export const getPortfolioItem = query({
   },
 });
 
+/**
+ * Get all active watchers of a specific asset (stated watch, inferred watch, or owned).
+ * Returns portfolio items with last_alerted_at for deduplication.
+ */
+export const getWatchersByAsset = query({
+  args: { asset: v.id("assets") },
+  handler: async (ctx, args) => {
+    const items = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_asset", (q) => q.eq("asset", args.asset))
+      .collect();
+
+    return items.filter(
+      (item) =>
+        item.asset_status === "stated watch" ||
+        item.asset_status === "inferred watch" ||
+        item.asset_status === "owned"
+    );
+  },
+});
+
 // ============================================================================
 // MUTATIONS
 // ============================================================================
@@ -212,6 +233,19 @@ export const removeFromWatchlist = mutation({
 });
 
 /**
+ * Stamp last_alerted_at on a portfolio item after sending a price alert.
+ */
+export const stampAlerted = mutation({
+  args: {
+    id: v.id("portfolioItems"),
+    last_alerted_at: v.float64(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { last_alerted_at: args.last_alerted_at });
+  },
+});
+
+/**
  * Update the status of a portfolio item.
  */
 export const updateAssetStatus = mutation({
@@ -234,82 +268,5 @@ export const updateAssetStatus = mutation({
 
     await ctx.db.patch(existing._id, { asset_status: args.asset_status });
     return await ctx.db.get(existing._id);
-  },
-});
-
-// ============================================================================
-// ASSETS
-// ============================================================================
-
-/**
- * Get an asset by ID.
- */
-export const getAsset = query({
-  args: { id: v.id("assets") },
-  handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
-  },
-});
-
-/**
- * Get an asset by ticker symbol.
- */
-export const getAssetByTicker = query({
-  args: { ticker: v.string() },
-  handler: async (ctx, args) => {
-    const ticker = args.ticker.toUpperCase();
-    return await ctx.db
-      .query("assets")
-      .withIndex("by_ticker", (q) => q.eq("ticker", ticker))
-      .first();
-  },
-});
-
-/**
- * Search for an asset by name (full-text search).
- * Returns the best match, if any.
- */
-export const searchAssetByName = query({
-  args: { name: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.db
-      .query("assets")
-      .withSearchIndex("search_name", (q) => q.search("name", args.name))
-      .first();
-  },
-});
-
-/**
- * Create an asset (if it doesn't already exist by ticker).
- */
-export const createAsset = mutation({
-  args: {
-    ticker: v.optional(v.string()),
-    name: v.optional(v.string()),
-    liquid: v.boolean(),
-    asset_category: v.union(
-      v.literal("cryptotoken"),
-      v.literal("stock"),
-      v.literal("currency"),
-      v.literal("commodity")
-    ),
-    price_feed: v.optional(v.union(v.literal("defianalyst"))),
-  },
-  handler: async (ctx, args) => {
-    const ticker = args.ticker?.toUpperCase();
-
-    if (ticker) {
-      const existing = await ctx.db
-        .query("assets")
-        .withIndex("by_ticker", (q) => q.eq("ticker", ticker))
-        .first();
-
-      if (existing) {
-        return existing;
-      }
-    }
-
-    const id = await ctx.db.insert("assets", { ...args, ticker });
-    return await ctx.db.get(id);
   },
 });

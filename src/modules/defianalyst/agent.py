@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime
 
 from .coingecko_client import CoinGeckoClient
-from ..base import BaseModule
+from ..base import BaseModule, NotificationTypeConfig
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -624,7 +624,16 @@ class DeFiAnalystModule(BaseModule):
     def __init__(self):
         super().__init__(name="defianalyst", trigger="@defianalyst")
         self.coingecko_client = CoinGeckoClient()
-    
+
+    def get_notification_types(self) -> list[NotificationTypeConfig]:
+        return [
+            NotificationTypeConfig(
+                name="price_alert",
+                description="Price change alerts for watched assets",
+                default_enabled=True,
+            ),
+        ]
+
     async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
         """
         Process a user message and return cryptocurrency market data.

@@ -8,6 +8,8 @@ import { modules } from "./tables/modules";
 import { notificationTypes, notificationPreferences, notificationQueue } from "./tables/notifications";
 import { countries } from "./tables/countries";
 import { predictionEvents } from "./tables/predictionEvents";
+import { priceFeedMappings } from "./tables/priceFeedMappings";
+import { alertThresholds } from "./tables/alertThresholds";
 
 export default defineSchema({
   users,
@@ -23,4 +25,6 @@ export default defineSchema({
   notificationQueue,
   countries,
   predictionEvents,
+  priceFeedMappings,
+  alertThresholds,
 });

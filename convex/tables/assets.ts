@@ -24,6 +24,10 @@ export const assets = defineTable({
   liquid: v.boolean(),
   asset_category: AssetCategory,
   price_feed: v.optional(PriceFeed),
+  current_price_usd: v.optional(v.float64()),
+  price_change_pct_24h: v.optional(v.float64()),
+  price_change_pct_7d: v.optional(v.float64()),
+  price_updated_at: v.optional(v.float64()),
 })
   .index("by_ticker", ["ticker"])
   .index("by_category", ["asset_category"])

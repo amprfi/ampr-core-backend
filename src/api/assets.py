@@ -42,7 +42,7 @@ async def get_asset_by_ticker(ticker: str):
     """Look up an asset by its ticker symbol."""
     try:
         convex_client = get_client()
-        asset = convex_client.query("portfolioItems:getAssetByTicker", {
+        asset = convex_client.query("assets:getAssetByTicker", {
             "ticker": ticker,
         })
         if not asset:
@@ -87,7 +87,7 @@ async def create_asset(request: CreateAssetRequest):
     try:
         convex_client = get_client()
         args = _build_create_asset_args(request)
-        result = convex_client.mutation("portfolioItems:createAsset", args)
+        result = convex_client.mutation("assets:createAsset", args)
         return {"asset": result}
 
     except Exception as e:
@@ -113,7 +113,7 @@ async def bulk_create_assets(assets: list[CreateAssetRequest]):
         results = []
         for asset_req in assets:
             args = _build_create_asset_args(asset_req)
-            result = convex_client.mutation("portfolioItems:createAsset", args)
+            result = convex_client.mutation("assets:createAsset", args)
             results.append(result)
         return {"assets": results}
 
