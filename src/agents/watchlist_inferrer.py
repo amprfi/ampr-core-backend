@@ -23,8 +23,14 @@ async def _get_coingecko_coins() -> list[dict]:
 
 def _resolve_coingecko_id(coins_list: list[dict], ticker: str | None, name: str | None) -> str | None:
     """
-    Resolve a CoinGecko coin ID from a ticker or name.
-    Tries exact ticker match first, then exact name match.
+    Resolve a CoinGecko coin ID from a ticker and/or name.
+    Uses a prioritized matching strategy to avoid false positives from
+    obscure coins sharing a ticker symbol (e.g. "Batcat" with symbol "BTC").
+
+    Priority:
+      1. Exact match on both ticker AND name (most precise)
+      2. Exact name match only
+      3. Exact ticker match only
     """
     if not ticker and not name:
         return None
@@ -32,17 +38,28 @@ def _resolve_coingecko_id(coins_list: list[dict], ticker: str | None, name: str 
     ticker_lower = ticker.lower() if ticker else None
     name_lower = name.lower() if name else None
 
+    ticker_match: str | None = None
+    name_match: str | None = None
+
     for coin in coins_list:
         coin_symbol = coin.get("symbol", "").lower()
         coin_name = coin.get("name", "").lower()
         coin_id = coin.get("id", "")
 
-        if ticker_lower and coin_symbol == ticker_lower:
-            return coin_id
-        if name_lower and coin_name == name_lower:
+        symbol_matches = ticker_lower and coin_symbol == ticker_lower
+        name_matches = name_lower and coin_name == name_lower
+
+        # Best case: both ticker and name match — return immediately
+        if symbol_matches and name_matches:
             return coin_id
 
-    return None
+        # Track first ticker-only and name-only matches as fallbacks
+        if symbol_matches and ticker_match is None:
+            ticker_match = coin_id
+        if name_matches and name_match is None:
+            name_match = coin_id
+
+    return name_match or ticker_match
 
 
 class WatchlistInferrerContext(BaseModel):
