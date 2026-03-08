@@ -1,9 +1,9 @@
 # Third-Party Module Configuration
-# Defines modules that can be invoked via @mention syntax or automatically by amprChat
+# Defines modules that can be invoked via &mention syntax or automatically by amprChat
 
 modules:
   - name: "defianalyst"
-    trigger: "@defianalyst"
+    trigger: "&defianalyst"
     path: "src.modules.defianalyst"
     enabled: true
     description: "Cryptocurrency market data analyst powered by CoinGecko API"
@@ -14,9 +14,9 @@ modules:
       - "historical prices"
       - "top gainers/losers"
       - "ATH/ATL data"
-  
+
   - name: "oracle"
-    trigger: "@oracle"
+    trigger: "&oracle"
     path: "src.modules.oracle"
     enabled: true
     description: "Prediction markets specialist for economic and financial predictions"

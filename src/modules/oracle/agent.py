@@ -31,27 +31,27 @@ async def get_tracked_events(
     """
     Get the list of prediction events that are currently being tracked.
     Use this to discover available events and their slugs before querying specific event data.
-    
+
     Returns:
         Formatted list of tracked events with slugs, titles, and descriptions
     """
     logger.info("Tool called: get_tracked_events")
-    
+
     try:
         events = ctx.deps.convex_client.query("predictionEvents:getActiveEvents")
-        
+
         if not events:
             return "No prediction events are currently being tracked."
-        
+
         lines = [f"Tracked Prediction Events ({len(events)}):"]
-        
+
         for i, event in enumerate(events, 1):
             title = event.get("title", "Unknown")
             slug = event.get("slug", "")
             description = event.get("description", "")
             tags = event.get("tags", [])
             end_date = event.get("endDate", "")
-            
+
             lines.append(f"{i}. {title}")
             lines.append(f"   Slug: {slug}")
             if description:
@@ -61,11 +61,11 @@ async def get_tracked_events(
             if end_date:
                 lines.append(f"   End Date: {end_date}")
             lines.append("")
-        
+
         result = "\n".join(lines)
         logger.info(f"Tool result: Found {len(events)} tracked events")
         return result
-        
+
     except Exception as e:
         error_msg = f"Failed to retrieve tracked events: {str(e)}"
         logger.error(f"Tool error: get_tracked_events - {error_msg}")
@@ -80,31 +80,31 @@ async def get_event(
     """
     Get prediction market data for an event by its slug.
     Use get_tracked_events first to see available slugs.
-    
+
     Args:
         slug: The event slug (e.g., "will-bitcoin-hit-100k-in-2025")
-        
+
     Returns:
         Formatted string with event details and constituent market probabilities
     """
     logger.info(f"Tool called: get_event for slug={slug}")
-    
+
     try:
         data = await ctx.deps.polymarket_client.get_event_by_slug(slug)
-        
+
         title = data.get("title", "Unknown Event")
         description = data.get("description", "")
         end_date = data.get("endDate", "Unknown")
         closed = data.get("closed", False)
         total_liquidity = data.get("liquidity", 0)
         total_volume = data.get("volume", 0)
-        
+
         if end_date and len(end_date) >= 10:
             end_date = end_date[:10]
-        
+
         liquidity_str = f"${float(total_liquidity):,.0f}" if total_liquidity else "N/A"
         volume_str = f"${float(total_volume):,.0f}" if total_volume else "N/A"
-        
+
         lines = [
             f"Event: {title}",
             f"Status: {'Resolved' if closed else 'Active'}",
@@ -112,15 +112,15 @@ async def get_event(
             f"Total Liquidity: {liquidity_str}",
             f"Total Volume: {volume_str}",
         ]
-        
+
         if description:
             lines.append(f"Description: {description[:200]}{'...' if len(description) > 200 else ''}")
-        
+
         markets = data.get("markets", [])
         if markets:
             lines.append("")
             lines.append(f"Markets ({len(markets)}):")
-            
+
             for i, market in enumerate(markets, 1):
                 group_title = market.get("groupItemTitle", "")
                 question = market.get("question", "Unknown")
@@ -128,19 +128,19 @@ async def get_event(
                 outcome_prices = market.get("outcomePrices", [])
                 market_volume = market.get("volume", 0)
                 market_closed = market.get("closed", False)
-                
+
                 probability = None
                 if outcome_prices and len(outcome_prices) >= 1:
                     try:
                         probability = float(outcome_prices[0]) * 100
                     except (ValueError, TypeError):
                         probability = None
-                
+
                 market_volume_str = f"${float(market_volume):,.0f}" if market_volume else "N/A"
                 status = " [Resolved]" if market_closed else ""
-                
+
                 display_name = group_title if group_title else question
-                
+
                 if probability is not None:
                     lines.append(f"{i}. {display_name}: {probability:.1f}% probability{status}")
                 else:
@@ -148,11 +148,11 @@ async def get_event(
                 lines.append(f"   Volume: {market_volume_str}")
         else:
             lines.append("No markets found for this event.")
-        
+
         result = "\n".join(lines)
         logger.info(f"Tool result: Successfully retrieved event {slug}")
         return result
-        
+
     except Exception as e:
         error_msg = f"Failed to retrieve event '{slug}': {str(e)}"
         logger.error(f"Tool error: get_event - {error_msg}")
@@ -198,12 +198,12 @@ class OracleModule(BaseModule):
     Oracle module for prediction market data.
     Integrates with Polymarket API to provide event odds and market information.
     """
-    
+
     def __init__(self, convex_client: Optional[ConvexClient] = None):
-        super().__init__(name="oracle", trigger="@oracle")
+        super().__init__(name="oracle", trigger="&oracle")
         self.polymarket_client = PolymarketClient()
         self._convex_client_instance = convex_client
-    
+
     def _get_convex_client(self) -> ConvexClient:
         if self._convex_client_instance:
             return self._convex_client_instance
@@ -211,43 +211,43 @@ class OracleModule(BaseModule):
             return self._convex_client
         from ...clients.convex_client import get_client
         return get_client()
-    
+
     async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
         """
         Process a user message and return prediction market data.
-        
+
         Args:
-            message: The full user message (including @oracle mention)
+            message: The full user message (including &oracle mention)
             date_context: Optional resolved date context from preprocessor
-            
+
         Returns:
             Prediction market data response as a string
         """
         try:
             logger.info(f"Oracle invoked with message: {message}")
-            
+
             agent_input = message
             if date_context:
                 agent_input = f"{message}\n\n{date_context}"
                 logger.info(f"Oracle using date context: {date_context}")
-            
+
             context = OracleContext(
                 polymarket_client=self.polymarket_client,
                 convex_client=self._get_convex_client()
             )
-            
+
             result = await agent.run(agent_input, deps=context)
-            
+
             response = result.output
             logger.info(f"Oracle response: {response}")
-            
+
             return response
-            
+
         except Exception as e:
             error_msg = f"Oracle error: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
-    
+
     async def close(self):
         """Clean up resources."""
         await self.polymarket_client.close()

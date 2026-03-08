@@ -17,7 +17,7 @@ class TalkerContext(BaseModel):
     user_id: str
     date_context: str | None = None
     invoked_modules: list[str] = []
-    module_already_invoked: bool = False  # True if @mention already triggered a module
+    module_already_invoked: bool = False  # True if &mention already triggered a module
 
 agent = Agent(
     "mistral:mistral-large-latest",
@@ -65,9 +65,9 @@ async def user_investment_preferences(ctx: RunContext[TalkerContext]) -> List[st
             stated_risk_appetite=result.get("stated_risk_appetite"),
             stated_investment_knowledge=result.get("stated_investment_knowledge"),
             stated_financial_goals=result.get("stated_financial_goals"),
-            
+
             other_investments=result.get("other_investments"),
-            
+
             inferred_investment_horizon=result.get("inferred_investment_horizon"),
             inferred_risk_appetite=result.get("inferred_risk_appetite"),
             inferred_investment_knowledge=result.get("inferred_investment_knowledge"),
@@ -103,42 +103,42 @@ async def call_specialist_module(
 ) -> str:
     """
     Call a specialist financial module when you need live or detailed data.
-    
+
     Args:
         module_name: The module to call. Available modules:
             - "defianalyst": Cryptocurrency & token market data (prices, market caps, volumes, historical data)
             - "oracle": Prediction market prices & probabilities (Polymarket data)
         question: A focused description of what you want the module to answer,
             derived from the user's request.
-    
+
     Returns:
         The module's response with the requested data.
     """
     logger.info(f"Tool called: call_specialist_module for module={module_name}")
-    
+
     if ctx.deps.module_already_invoked:
-        logger.info("Module already invoked via @mention, skipping tool call")
+        logger.info("Module already invoked via &mention, skipping tool call")
         return "A specialist module has already been invoked for this request. Use the data from [MODULE RESPONSE] instead."
-    
+
     registry = get_module_registry()
     module = registry.get_module(module_name)
-    
+
     if not module:
         available = [m["name"] for m in registry.list_modules()]
         error_msg = f"Unknown module '{module_name}'. Available modules: {', '.join(available)}"
         logger.warning(f"Tool error: call_specialist_module - {error_msg}")
         return f"ERROR: {error_msg}"
-    
+
     try:
         result = await registry.invoke_module(
             module_name,
             message=question,
             date_context=ctx.deps.date_context,
         )
-        
+
         if module_name not in ctx.deps.invoked_modules:
             ctx.deps.invoked_modules.append(module_name)
-        
+
         logger.info(f"Tool result: call_specialist_module for {module_name} succeeded")
         return result
     except Exception as e:
@@ -171,7 +171,7 @@ You have access to specialist modules that provide real-time financial data. Whe
 - Future prices for assets or probabilities of various finanical or economic events → call "oracle" module
 
 CONTENT RESTRICTIONS:
-If there is a [MODULE RESPONSE] section (from an @mention trigger):
+If there is a [MODULE RESPONSE] section (from an &mention trigger):
 - A specialist module has already been invoked - DO NOT call call_specialist_module again
 - Present the data naturally and conversationally
 - Preserve all numbers, dates, and factual information exactly
@@ -183,8 +183,8 @@ If there is NO [MODULE RESPONSE] section:
 - If the module fails or is unavailable, tell the user you cannot retrieve that data right now
 
 MODULE ATTRIBUTION:
-- When your answer is based on data from a specialist module, briefly mention it once using the format "via @[module]"
-- Example: "Via @defianalyst, Bitcoin is currently trading at $50,000."
+- When your answer is based on data from a specialist module, briefly mention it once using the format "via &[module]"
+- Example: "Via &defianalyst, Bitcoin is currently trading at $50,000."
 - Don't repeat the attribution for follow-up details from the same module call
 
 RESPONSE FORMAT:

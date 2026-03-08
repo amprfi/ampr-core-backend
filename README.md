@@ -138,7 +138,7 @@ Extensible architecture for specialized agents:
   - Price lookups, market cap rankings
   - Historical comparisons, ATH/ATL data
   - Top gainers/losers across timeframes
-- Modules are triggered via `@mention` syntax (e.g., `@defianalyst what's bitcoin's price?`)
+- Modules are triggered via `&mention` syntax (e.g., `&defianalyst what's bitcoin's price?`)
 
 ### 4. Webhook Handlers (`src/api/webhooks.py`)
 
