@@ -16,7 +16,7 @@ from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext
 from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
-from ..agents.watchlist_inferrer import get_watchlist_inferrer_agent, WatchlistInferrerContext
+from ..agents.watchlist_inferrer import infer_watchlist
 from ..modules.registry import get_module_registry
 from ..utils.formatting import strip_markdown
 
@@ -292,15 +292,13 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
 async def _infer_watchlist(convex_client: ConvexClient, user_id: str, message: str):
     """
-    Run the watchlist inferrer agent to detect asset mentions in the user's message.
+    Run watchlist inference to detect asset mentions in the user's message.
     Fire-and-forget — errors are logged but never propagated.
     """
     try:
         logger.info(f"Watchlist inferrer starting for user {user_id}: {message!r}")
-        agent = get_watchlist_inferrer_agent()
-        deps = WatchlistInferrerContext(convex_client=convex_client, user_id=user_id)
-        result = await agent.run(message, deps=deps)
-        logger.info(f"Watchlist inferrer completed for user {user_id}: {result.output}")
+        result = await infer_watchlist(convex_client, user_id, message)
+        logger.info(f"Watchlist inferrer completed for user {user_id}: {result}")
     except Exception as e:
         logger.error(f"Watchlist inference failed for user {user_id}: {str(e)}", exc_info=True)
 

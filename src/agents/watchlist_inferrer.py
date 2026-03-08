@@ -1,8 +1,9 @@
-from pydantic_ai import Agent, RunContext
-from pydantic import BaseModel, ConfigDict
+from pydantic_ai import Agent
+from pydantic import BaseModel
 from typing import Optional
 from convex import ConvexClient
 import logging
+import re
 
 from ..modules.defianalyst.coingecko_client import CoinGeckoClient
 
@@ -10,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 # Cached CoinGecko coins list for resolving external IDs
 _coingecko_coins_cache: Optional[list[dict]] = None
+
+# Cached asset identifiers from the database
+_asset_identifiers_cache: Optional[list[dict]] = None
 
 
 async def _get_coingecko_coins() -> list[dict]:
@@ -62,122 +66,55 @@ def _resolve_coingecko_id(coins_list: list[dict], ticker: str | None, name: str 
     return name_match or ticker_match
 
 
-class WatchlistInferrerContext(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    convex_client: ConvexClient
-    user_id: str
+def _get_asset_identifiers(convex_client: ConvexClient) -> list[dict]:
+    """Fetch and cache all asset identifiers from the database."""
+    global _asset_identifiers_cache
+    if _asset_identifiers_cache is None:
+        _asset_identifiers_cache = convex_client.query("assets:getAllAssetIdentifiers", {})
+    return _asset_identifiers_cache
 
 
-agent = Agent(
-    "mistral:mistral-small-latest",
-    deps_type=WatchlistInferrerContext,
-    output_type=str,
-)
-
-
-@agent.tool
-async def resolve_and_track_asset(
-    ctx: RunContext[WatchlistInferrerContext],
-    is_explicit_watch: bool,
-    query: str,
-    asset_category: Optional[str] = None,
-) -> str:
+def _scan_message_for_assets(message: str, asset_identifiers: list[dict]) -> list[dict]:
     """
-    Resolve an asset and add it to the user's watchlist.
-    Call this for each financial asset mentioned in the user's message.
-
-    Args:
-        is_explicit_watch: True if the user explicitly asked to watch/track/monitor this asset
-        query: The asset's ticker symbol or name as mentioned by the user (e.g., BTC, Bitcoin, XCH, Solana)
-        asset_category: One of: cryptotoken, stock, currency, commodity (if known)
+    Scan a message for mentions of known assets by ticker or name.
+    Returns a list of matched asset dicts (with _id, ticker, name).
+    Uses word-boundary matching to avoid false positives.
     """
-    logger.info(
-        f"Tool called: resolve_and_track_asset query={query} "
-        f"explicit={is_explicit_watch} user={ctx.deps.user_id}"
-    )
-    try:
-        client = ctx.deps.convex_client
+    message_lower = message.lower()
+    matched = {}
 
-        asset = None
-
-        # 1. Try exact ticker lookup
-        asset = client.query("assets:getAssetByTicker", {"ticker": query.upper()})
-
-        # 2. Fall back to full-text name search
-        if not asset:
-            asset = client.query("assets:searchAssetByName", {"name": query})
-
-        if not asset:
-            logger.info(f"Asset '{query}' not found in database, skipping")
-            return f"Asset '{query}' not found, skipping"
-
+    for asset in asset_identifiers:
         asset_id = asset["_id"]
-        asset_label = asset.get("ticker") or asset.get("name") or asset_id
+        if asset_id in matched:
+            continue
 
-        # Ensure a priceFeedMapping exists for crypto assets
-        if asset.get("asset_category") == "cryptotoken" and asset.get("price_feed") == "defianalyst":
-            existing_mappings = client.query(
-                "priceFeedMappings:getMappingsByAsset", {"asset": asset_id}
-            )
-            if not existing_mappings:
-                try:
-                    coins_list = await _get_coingecko_coins()
-                    coingecko_id = _resolve_coingecko_id(
-                        coins_list, asset.get("ticker"), asset.get("name")
-                    )
-                    if coingecko_id:
-                        client.mutation("priceFeedMappings:upsertMapping", {
-                            "asset": asset_id,
-                            "price_feed": "defianalyst",
-                            "external_id": coingecko_id,
-                        })
-                        logger.info(f"Created priceFeedMapping for {asset_label} -> {coingecko_id}")
-                    else:
-                        logger.warning(f"Could not resolve CoinGecko ID for {asset_label}")
-                except Exception as e:
-                    logger.error(f"Error creating priceFeedMapping for {asset_label}: {e}")
+        # Check ticker match (word boundary, case-insensitive)
+        ticker = asset.get("ticker")
+        if ticker and len(ticker) >= 2:
+            pattern = r'\b' + re.escape(ticker.lower()) + r'\b'
+            if re.search(pattern, message_lower):
+                matched[asset_id] = asset
+                continue
 
-        # Check current status — never modify owned assets
-        existing = client.query("portfolioItems:getPortfolioItem", {
-            "user": ctx.deps.user_id,
-            "asset": asset_id,
-        })
+        # Check name match (word boundary, case-insensitive)
+        name = asset.get("name")
+        if name and len(name) >= 2:
+            pattern = r'\b' + re.escape(name.lower()) + r'\b'
+            if re.search(pattern, message_lower):
+                matched[asset_id] = asset
 
-        if existing and existing.get("asset_status") == "owned":
-            logger.info(f"Asset {asset_label} is owned, skipping")
-            return f"Asset {asset_label} is already owned, no change"
-
-        if is_explicit_watch:
-            result = client.mutation("portfolioItems:addToWatchlist", {
-                "user": ctx.deps.user_id,
-                "asset": asset_id,
-            })
-            logger.info(f"Added stated watch for {asset_label}: {result.get('asset_status')}")
-            return f"Added {asset_label} as stated watch"
-        else:
-            result = client.mutation("portfolioItems:addInferredWatch", {
-                "user": ctx.deps.user_id,
-                "asset": asset_id,
-            })
-            logger.info(f"Inferred watch for {asset_label}: {result.get('asset_status')}")
-            return f"Tracked {asset_label} as {result.get('asset_status')}"
-
-    except Exception as e:
-        error_msg = f"Error tracking asset '{query}': {str(e)}"
-        logger.error(f"Tool error: resolve_and_track_asset - {error_msg}")
-        return error_msg
+    return list(matched.values())
 
 
-PROMPT_TEMPLATE = """
-Your only job is to watch the user's message and identify any financial assets explicitly mentioned in it. Your purpose is to notice these mentions, you do not need to answer any questions or provide information back to the user. Watch for stocks, crypto-assets, commodities, and currencies. Pay close attention to anything that may look like a ticker symbol.
+# Agent is only used for intent classification — no tools needed
+_intent_agent = Agent(
+    "mistral:mistral-small-latest",
+    output_type=bool,
+    system_prompt="""You are a watch-intent classifier. You will receive a user message and a list of financial assets found in it.
 
-CRITICAL REQUIREMENTS:
-1. ONLY process assets that are explicitly named in the user's message. Do NOT infer, guess, or assume assets from context, general knowledge, or prior conversations.
-2. When in doubt about whether something is a financial asset, call resolve_and_track_asset anyway — the database lookup will filter out non-assets by returning "not found". It is better to attempt a lookup than to miss a real asset.
-3. For each asset found, call resolve_and_track_asset with the ticker symbol or name as the query. Prefer ticker symbols when known (e.g., "BTC" not "Bitcoin").
-4. Determine if the mention is an EXPLICIT watch request or just a casual mention.
+Your ONLY job is to determine if the user is EXPLICITLY asking to watch, track, or monitor these assets.
 
-EXPLICIT WATCH INDICATORS (is_explicit_watch = True):
+Return true if the user's message contains explicit watch intent such as:
 - "Watch this for me"
 - "Keep me updated on X"
 - "Track X"
@@ -187,30 +124,105 @@ EXPLICIT WATCH INDICATORS (is_explicit_watch = True):
 - "Follow X for me"
 - "Let me know if X changes"
 
-CASUAL MENTION (is_explicit_watch = False):
-- "What's the price of Bitcoin?"
-- "How is ETH doing?"
-- "Tell me about Apple stock"
-- "Compare BTC and SOL"
-- Any question or discussion about an asset without an explicit watch request
+Return false for casual mentions like:
+- "What's the price of X?"
+- "How is X doing?"
+- "Tell me about X"
+- "I'm interested in X"
+- Any question or discussion about an asset without an explicit watch/track request
 
-ASSET CATEGORIES:
-- cryptotoken: Bitcoin (BTC), Ethereum (ETH), Solana (SOL), etc.
-- stock: Apple (AAPL), Tesla (TSLA), etc.
-- currency: USD, EUR, GBP, etc.
-- commodity: Gold (XAU), Silver (XAG), Oil (WTI), etc.
-
-If no financial assets are explicitly mentioned in the message, do not call any tools.
-Do NOT fabricate or hallucinate assets that were not explicitly mentioned in the message.
-Do NOT use your general knowledge to add assets — only react to what the user actually wrote.
-After processing, respond with a short summary of what you tracked (e.g. "Tracked BTC, ETH" or "No assets mentioned").
-"""
+Only return true or false. Do not explain.""",
+)
 
 
-@agent.system_prompt
-def get_system_prompt(ctx: RunContext[WatchlistInferrerContext]) -> str:
-    return PROMPT_TEMPLATE
+class WatchlistInferenceResult(BaseModel):
+    """Result of a watchlist inference run."""
+    assets_found: list[str]
+    is_explicit_watch: bool
 
 
-def get_watchlist_inferrer_agent():
-    return agent
+async def infer_watchlist(convex_client: ConvexClient, user_id: str, message: str) -> str:
+    """
+    Main entry point for watchlist inference.
+    1. Scan the message against DB assets (deterministic).
+    2. If assets found, use the agent to classify intent (stated vs inferred).
+    3. Track all matched assets accordingly.
+    """
+    # Step 1: DB scan for asset mentions
+    asset_identifiers = _get_asset_identifiers(convex_client)
+    matched_assets = _scan_message_for_assets(message, asset_identifiers)
+
+    if not matched_assets:
+        logger.info(f"No assets found in message for user {user_id}")
+        return "No assets mentioned."
+
+    asset_labels = [a.get("ticker") or a.get("name") or a["_id"] for a in matched_assets]
+    logger.info(f"Found assets in message for user {user_id}: {asset_labels}")
+
+    # Step 2: Classify intent via agent
+    intent_prompt = f"User message: \"{message}\"\nAssets found: {', '.join(asset_labels)}"
+    try:
+        result = await _intent_agent.run(intent_prompt)
+        is_explicit = result.output
+    except Exception as e:
+        logger.error(f"Intent classification failed for user {user_id}: {e}")
+        is_explicit = False
+
+    # Step 3: Track each matched asset
+    for asset in matched_assets:
+        asset_id = asset["_id"]
+        asset_label = asset.get("ticker") or asset.get("name") or asset_id
+
+        try:
+            # Ensure priceFeedMapping exists for crypto assets
+            full_asset = convex_client.query("assets:getAsset", {"id": asset_id})
+            if full_asset and full_asset.get("asset_category") == "cryptotoken" and full_asset.get("price_feed") == "defianalyst":
+                existing_mappings = convex_client.query(
+                    "priceFeedMappings:getMappingsByAsset", {"asset": asset_id}
+                )
+                if not existing_mappings:
+                    try:
+                        coins_list = await _get_coingecko_coins()
+                        coingecko_id = _resolve_coingecko_id(
+                            coins_list, full_asset.get("ticker"), full_asset.get("name")
+                        )
+                        if coingecko_id:
+                            convex_client.mutation("priceFeedMappings:upsertMapping", {
+                                "asset": asset_id,
+                                "price_feed": "defianalyst",
+                                "external_id": coingecko_id,
+                            })
+                            logger.info(f"Created priceFeedMapping for {asset_label} -> {coingecko_id}")
+                        else:
+                            logger.warning(f"Could not resolve CoinGecko ID for {asset_label}")
+                    except Exception as e:
+                        logger.error(f"Error creating priceFeedMapping for {asset_label}: {e}")
+
+            # Check current status — never modify owned assets
+            existing = convex_client.query("portfolioItems:getPortfolioItem", {
+                "user": user_id,
+                "asset": asset_id,
+            })
+
+            if existing and existing.get("asset_status") == "owned":
+                logger.info(f"Asset {asset_label} is owned, skipping")
+                continue
+
+            if is_explicit:
+                result = convex_client.mutation("portfolioItems:addToWatchlist", {
+                    "user": user_id,
+                    "asset": asset_id,
+                })
+                logger.info(f"Added stated watch for {asset_label}: {result.get('asset_status')}")
+            else:
+                result = convex_client.mutation("portfolioItems:addInferredWatch", {
+                    "user": user_id,
+                    "asset": asset_id,
+                })
+                logger.info(f"Inferred watch for {asset_label}: {result.get('asset_status')}")
+
+        except Exception as e:
+            logger.error(f"Error tracking asset {asset_label}: {e}")
+
+    action = "Watched" if is_explicit else "Tracked"
+    return f"{action} {', '.join(asset_labels)}"

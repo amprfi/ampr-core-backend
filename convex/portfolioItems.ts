@@ -165,9 +165,10 @@ export const addToWatchlist = mutation({
 
 /**
  * Add an inferred watch (called by AI when user mentions an asset).
- * Two-step promotion:
- * - If no existing item, creates with "pending inferred watch".
- * - If existing "pending inferred watch", upgrades to "inferred watch".
+ * Four-step promotion:
+ * - If no existing item, creates with "pending inferred watch" (mention_count = 1).
+ * - If existing "pending inferred watch", increments mention count.
+ * - When mention count reaches 4, upgrades to "inferred watch".
  * - If already "inferred watch", "stated watch", or "owned", no-op.
  */
 export const addInferredWatch = mutation({
@@ -185,8 +186,16 @@ export const addInferredWatch = mutation({
 
     if (existing) {
       if (existing.asset_status === "pending inferred watch") {
-        await ctx.db.patch(existing._id, { asset_status: "inferred watch" });
-        return { ...existing, asset_status: "inferred watch" };
+        const newCount = (existing.inferred_mention_count ?? 1) + 1;
+        if (newCount >= 4) {
+          await ctx.db.patch(existing._id, {
+            asset_status: "inferred watch",
+            inferred_mention_count: newCount,
+          });
+          return { ...existing, asset_status: "inferred watch", inferred_mention_count: newCount };
+        }
+        await ctx.db.patch(existing._id, { inferred_mention_count: newCount });
+        return { ...existing, inferred_mention_count: newCount };
       }
       return existing;
     }
@@ -195,6 +204,7 @@ export const addInferredWatch = mutation({
       user: args.user,
       asset: args.asset,
       asset_status: "pending inferred watch",
+      inferred_mention_count: 1,
     });
 
     return await ctx.db.get(id);

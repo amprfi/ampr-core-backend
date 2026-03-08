@@ -43,6 +43,22 @@ export const searchAssetByName = query({
   },
 });
 
+/**
+ * Get all asset identifiers (ticker and name) for message scanning.
+ * Returns minimal data to keep the payload small.
+ */
+export const getAllAssetIdentifiers = query({
+  args: {},
+  handler: async (ctx) => {
+    const assets = await ctx.db.query("assets").collect();
+    return assets.map((a) => ({
+      _id: a._id,
+      ticker: a.ticker,
+      name: a.name,
+    }));
+  },
+});
+
 // ============================================================================
 // MUTATIONS
 // ============================================================================
