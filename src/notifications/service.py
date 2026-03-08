@@ -47,6 +47,7 @@ class NotificationService:
         module_id: str,
         notification_type_id: str,
         content: str,
+        asset_ref: Optional[str] = None,
     ) -> NotificationResult:
         """
         Send a notification to a user.
@@ -61,6 +62,7 @@ class NotificationService:
             module_id: Convex module ID
             notification_type_id: Convex notification type ID
             content: Notification message content
+            asset_ref: Optional Convex asset ID for overnight deduplication
             
         Returns:
             NotificationResult with delivery status
@@ -112,6 +114,7 @@ class NotificationService:
                     notification_type_id=notification_type_id,
                     content=content,
                     scheduled_for_ms=scheduled_for_ms,
+                    asset_ref=asset_ref,
                 )
                 
         except Exception as e:
@@ -181,15 +184,19 @@ class NotificationService:
         notification_type_id: str,
         content: str,
         scheduled_for_ms: int,
+        asset_ref: Optional[str] = None,
     ) -> NotificationResult:
         """Queue notification for later delivery."""
-        queue_id = self.convex.mutation("notifications:enqueueNotification", {
+        args: dict = {
             "user": user_id,
             "module": module_id,
             "notification_type": notification_type_id,
             "content": content,
             "scheduled_for": scheduled_for_ms,
-        })
+        }
+        if asset_ref is not None:
+            args["asset_ref"] = asset_ref
+        queue_id = self.convex.mutation("notifications:enqueueNotification", args)
         
         logger.info(f"Queued notification for user {user_id}, scheduled for {scheduled_for_ms}")
         

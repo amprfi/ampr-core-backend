@@ -105,6 +105,7 @@ class PriceAlertChecker:
                     module_id=self.module_id,
                     notification_type_id=self.notification_type_id,
                     content=content,
+                    asset_ref=asset_id,
                 )
 
                 if result.success:

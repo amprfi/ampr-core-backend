@@ -127,6 +127,7 @@ class BaseModule(ABC):
         user_id: str,
         notification_type_name: str,
         content: str,
+        asset_ref: Optional[str] = None,
     ) -> bool:
         """
         Send a notification to a user.
@@ -135,6 +136,7 @@ class BaseModule(ABC):
             user_id: Convex user ID
             notification_type_name: Name of the registered notification type
             content: Notification message content
+            asset_ref: Optional Convex asset ID for overnight deduplication
             
         Returns:
             True if notification was sent or queued successfully
@@ -156,6 +158,7 @@ class BaseModule(ABC):
             module_id=self._module_id,
             notification_type_id=type_id,
             content=content,
+            asset_ref=asset_ref,
         )
         
         return result.success

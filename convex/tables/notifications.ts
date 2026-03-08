@@ -66,7 +66,9 @@ export const notificationQueue = defineTable({
   status: NotificationQueueStatus,
   attempts: v.optional(v.number()),
   last_error: v.optional(v.string()),
+  asset_ref: v.optional(v.id("assets")),
 })
   .index("by_status_scheduled", ["status", "scheduled_for"])
   .index("by_user", ["user"])
-  .index("by_user_module", ["user", "module"]);
+  .index("by_user_module", ["user", "module"])
+  .index("by_user_type_asset", ["user", "notification_type", "asset_ref", "status"]);

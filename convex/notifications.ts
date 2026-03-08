@@ -359,8 +359,33 @@ export const enqueueNotification = mutation({
     notification_type: v.id("notificationTypes"),
     content: v.string(),
     scheduled_for: v.number(),
+    asset_ref: v.optional(v.id("assets")),
   },
   handler: async (ctx, args) => {
+    // Deduplicate: if an asset_ref is provided, upsert any existing pending
+    // notification for the same user + notification_type + asset so that only
+    // the most recent content is delivered after the overnight pause.
+    if (args.asset_ref) {
+      const existing = await ctx.db
+        .query("notificationQueue")
+        .withIndex("by_user_type_asset", (q) =>
+          q
+            .eq("user", args.user)
+            .eq("notification_type", args.notification_type)
+            .eq("asset_ref", args.asset_ref)
+            .eq("status", "pending")
+        )
+        .first();
+
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          content: args.content,
+          scheduled_for: args.scheduled_for,
+        });
+        return existing._id;
+      }
+    }
+
     return await ctx.db.insert("notificationQueue", {
       ...args,
       status: "pending",
