@@ -64,8 +64,7 @@ def get_telegram_bot() -> Bot:
     """
     token = get_telegram_bot_token()
     
-    # Configure bot to use plain text (no markdown/HTML for now)
     return Bot(
         token=token,
-        default=DefaultBotProperties(parse_mode=None)
+        default=DefaultBotProperties(parse_mode="Markdown")
     )

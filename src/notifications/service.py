@@ -14,6 +14,7 @@ from convex import ConvexClient
 
 from .timezone import get_timezone_utils
 from ..clients.telegram_client import TelegramClient
+from ..utils.formatting import strip_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,7 @@ class NotificationService:
     
     async def _send_sms(self, phone: str, content: str) -> bool:
         """Send message via SMS (placeholder for Vonage integration)."""
+        content = strip_markdown(content)
         # TODO: Implement SMS sending via Vonage
         logger.warning("SMS sending not yet implemented")
         return False

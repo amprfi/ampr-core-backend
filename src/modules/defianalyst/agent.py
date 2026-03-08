@@ -572,7 +572,7 @@ IMPORTANT GUIDELINES:
 4. If data is unavailable or an error occurs, clearly state the issue
 5. Keep responses concise and data-focused
 6. Do not provide investment advice or speculation about future prices
-7. Use plain text only - no Markdown formatting (**, *, _, etc.), no bullet points, no headers
+7. You may use Markdown formatting (bold, italic, etc.) where it improves readability
 8. All rankings automatically filter for coins with 24h volume >= $50,000
 
 TOOL SELECTION GUIDE:

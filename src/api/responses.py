@@ -18,6 +18,7 @@ from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreproce
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..agents.watchlist_inferrer import get_watchlist_inferrer_agent, WatchlistInferrerContext
 from ..modules.registry import get_module_registry
+from ..utils.formatting import strip_markdown
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -246,6 +247,10 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         # Store and send each message
         for response_content in response_messages:
+            # Strip markdown for plain-text channels (e.g. SMS)
+            if context.channel == "sms":
+                response_content = strip_markdown(response_content)
+
             # Store the assistant's response in the database
             message_data: dict = {
                 "userId": context.user_id,

@@ -183,7 +183,7 @@ CRITICAL RULES:
 3. NEVER derive probabilities from volume
 4. Keep responses concise and data-focused
 5. Do not provide betting advice
-6. Use plain text only - no Markdown formatting
+6. You may use Markdown formatting (bold, italic, etc.) where it improves readability
 """
 
 
