@@ -88,11 +88,11 @@ def _scan_message_for_assets(message: str, asset_identifiers: list[dict]) -> lis
         if asset_id in matched:
             continue
 
-        # Check ticker match (word boundary, case-insensitive)
+        # Check ticker match (word boundary, uppercase only)
         ticker = asset.get("ticker")
         if ticker and len(ticker) >= 2:
-            pattern = r'\b' + re.escape(ticker.lower()) + r'\b'
-            if re.search(pattern, message_lower):
+            pattern = r'\b' + re.escape(ticker) + r'\b'
+            if re.search(pattern, message):
                 matched[asset_id] = asset
                 continue
 
