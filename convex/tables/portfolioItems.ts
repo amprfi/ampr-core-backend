@@ -21,6 +21,7 @@ export const portfolioItems = defineTable({
   asset_status: AssetStatus,
   inferred_mention_count: v.optional(v.float64()),
   last_alerted_at: v.optional(v.float64()),
+  override_alerted_at: v.optional(v.float64()),
 })
   .index("by_user", ["user"])
   .index("by_asset", ["asset"])

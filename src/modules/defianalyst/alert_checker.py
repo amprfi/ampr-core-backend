@@ -6,7 +6,7 @@ user-defined thresholds and triggers notifications.
 
 Deduplication rules:
 - After alerting, a 24-hour cooldown prevents repeat alerts for the same user+asset.
-- If the price change reaches 2x the threshold, the cooldown is bypassed.
+- If the price change reaches 2x the threshold, one additional notification is allowed per cooldown period.
 """
 import logging
 import time
@@ -93,9 +93,13 @@ class PriceAlertChecker:
                     and (now - last_alerted_at) < ALERT_COOLDOWN_MS
                 )
 
+                is_override = False
                 if in_cooldown:
-                    # Bypass cooldown only if change is 2x the threshold
-                    if max_change < threshold * 2:
+                    override_alerted_at = watcher.get("override_alerted_at")
+                    if max_change >= threshold * 2 and override_alerted_at is None:
+                        # Allow one override notification during this cooldown
+                        is_override = True
+                    else:
                         continue
 
                 # Build and send alert
@@ -109,10 +113,13 @@ class PriceAlertChecker:
                 )
 
                 if result.success:
-                    # Stamp last_alerted_at
                     self.convex.mutation(
                         "portfolioItems:stampAlerted",
-                        {"id": watcher["_id"], "last_alerted_at": now},
+                        {
+                            "id": watcher["_id"],
+                            "last_alerted_at": now,
+                            "is_override": is_override,
+                        },
                     )
                     alerts_sent += 1
                     logger.info(

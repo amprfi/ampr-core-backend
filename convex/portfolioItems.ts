@@ -244,14 +244,24 @@ export const removeFromWatchlist = mutation({
 
 /**
  * Stamp last_alerted_at on a portfolio item after sending a price alert.
+ * When is_override is true, stamps override_alerted_at instead (one-time 2x bypass).
+ * When is_override is false, stamps last_alerted_at and clears override_alerted_at.
  */
 export const stampAlerted = mutation({
   args: {
     id: v.id("portfolioItems"),
     last_alerted_at: v.float64(),
+    is_override: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.id, { last_alerted_at: args.last_alerted_at });
+    if (args.is_override) {
+      await ctx.db.patch(args.id, { override_alerted_at: args.last_alerted_at });
+    } else {
+      await ctx.db.patch(args.id, {
+        last_alerted_at: args.last_alerted_at,
+        override_alerted_at: undefined,
+      });
+    }
   },
 });
 
