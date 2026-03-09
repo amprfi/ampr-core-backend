@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
 // Global default threshold if user has no configuration
-const GLOBAL_DEFAULT_THRESHOLD_PCT = 0.1;
+const GLOBAL_DEFAULT_THRESHOLD_PCT = 5.0;
 
 // ============================================================================
 // QUERIES

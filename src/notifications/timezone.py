@@ -13,8 +13,8 @@ from src.clients.convex_client import get_client
 logger = logging.getLogger(__name__)
 
 DEFAULT_UTC_OFFSET = 0
-DEFAULT_DELIVERY_WINDOW_START = 8   # 8:00 AM local
-DEFAULT_DELIVERY_WINDOW_END = 20    # 8:00 PM local
+DEFAULT_DELIVERY_WINDOW_START = 7   # 7:00 AM local
+DEFAULT_DELIVERY_WINDOW_END = 21    # 9:00 PM local
 
 
 class TimezoneUtils:
