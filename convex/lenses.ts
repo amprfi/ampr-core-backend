@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, mutation, internalQuery, action } from "./_generated/server";
+import { query, mutation, internalQuery, internalMutation, action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { SourceType } from "./tables/lenses";
 
@@ -115,6 +115,24 @@ export const getChunksWithDocuments = internalQuery({
   },
 });
 
+/**
+ * Internal mutation to patch a document's originalText and storageId.
+ * Called by importDocumentFromStorage action.
+ */
+export const patchDocumentText = internalMutation({
+  args: {
+    documentId: v.id("lensDocuments"),
+    originalText: v.string(),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.documentId, {
+      originalText: args.originalText,
+      storageId: args.storageId,
+    });
+  },
+});
+
 // ============================================================================
 // ACTIONS
 // ============================================================================
@@ -215,6 +233,34 @@ export const vectorSearchChunks = action({
   },
 });
 
+/**
+ * Import markdown content from a file in Convex storage into a document's
+ * originalText field. Upload the .md file via the dashboard's file storage,
+ * then call this action with the document ID and storage ID.
+ */
+export const importDocumentFromStorage = action({
+  args: {
+    documentId: v.id("lensDocuments"),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const blob = await ctx.storage.get(args.storageId);
+    if (!blob) {
+      throw new Error("File not found in storage");
+    }
+
+    const text = await blob.text();
+
+    await ctx.runMutation(internal.lenses.patchDocumentText, {
+      documentId: args.documentId,
+      originalText: text,
+      storageId: args.storageId,
+    });
+
+    return { success: true, length: text.length };
+  },
+});
+
 // ============================================================================
 // MUTATIONS
 // ============================================================================
@@ -258,6 +304,7 @@ export const createDocument = mutation({
     summary: v.string(),
     chunkCount: v.number(),
     publishedAt: v.optional(v.number()),
+    storageId: v.optional(v.id("_storage")),
     tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {

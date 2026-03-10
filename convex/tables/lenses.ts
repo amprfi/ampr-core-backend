@@ -38,6 +38,7 @@ export const lensDocuments = defineTable({
   summary: v.string(),
   chunkCount: v.number(),
   publishedAt: v.optional(v.number()),
+  storageId: v.optional(v.id("_storage")),
   tags: v.optional(v.array(v.string())),
 })
   .index("by_lens", ["lens"]);
