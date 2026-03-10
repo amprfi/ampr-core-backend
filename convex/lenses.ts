@@ -104,6 +104,7 @@ export const getChunksWithDocuments = internalQuery({
             sourceType: doc.sourceType,
             summary: doc.summary,
             originalText: doc.originalText,
+            publishedAt: doc.publishedAt,
             tags: doc.tags,
           });
         }
@@ -227,6 +228,7 @@ export const createLens = mutation({
     authorName: v.string(),
     description: v.string(),
     systemPrompt: v.string(),
+    url: v.optional(v.string()),
     createdBy: v.id("users"),
   },
   handler: async (ctx, args) => {
@@ -255,6 +257,7 @@ export const createDocument = mutation({
     originalText: v.string(),
     summary: v.string(),
     chunkCount: v.number(),
+    publishedAt: v.optional(v.number()),
     tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {

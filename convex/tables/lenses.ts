@@ -19,6 +19,7 @@ export const lenses = defineTable({
   authorName: v.string(),
   description: v.string(),
   systemPrompt: v.string(),
+  url: v.optional(v.string()),
   createdBy: v.id("users"),
 })
   .index("by_name", ["name"])
@@ -36,6 +37,7 @@ export const lensDocuments = defineTable({
   originalText: v.string(),
   summary: v.string(),
   chunkCount: v.number(),
+  publishedAt: v.optional(v.number()),
   tags: v.optional(v.array(v.string())),
 })
   .index("by_lens", ["lens"]);
