@@ -25,3 +25,13 @@ modules:
       - "event probabilities"
       - "economic forecast"
       - "macro predictions"
+
+  - name: "lens"
+    trigger: "&lens"
+    path: "src.modules.lens"
+    enabled: true
+    description: "RAG-powered author agent — search and interact with an author's indexed content"
+    intents:
+      - "author insights"
+      - "content search"
+      - "author perspective"

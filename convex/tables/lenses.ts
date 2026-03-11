@@ -16,7 +16,7 @@ export const SourceType = v.union(
  */
 export const lenses = defineTable({
   name: v.string(),
-  authorName: v.string(),
+  publisher: v.optional(v.string()),
   description: v.string(),
   systemPrompt: v.string(),
   url: v.optional(v.string()),
@@ -33,6 +33,7 @@ export const lenses = defineTable({
 export const lensDocuments = defineTable({
   lens: v.id("lenses"),
   title: v.string(),
+  authorName: v.optional(v.string()),
   sourceType: SourceType,
   originalText: v.string(),
   summary: v.string(),
