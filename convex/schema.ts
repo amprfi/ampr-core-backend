@@ -10,6 +10,7 @@ import { countries } from "./tables/countries";
 import { predictionEvents } from "./tables/predictionEvents";
 import { priceFeedMappings } from "./tables/priceFeedMappings";
 import { alertThresholds } from "./tables/alertThresholds";
+import { lenses, lensDocuments, lensChunks } from "./tables/lenses";
 
 export default defineSchema({
   users,
@@ -27,4 +28,7 @@ export default defineSchema({
   predictionEvents,
   priceFeedMappings,
   alertThresholds,
+  lenses,
+  lensDocuments,
+  lensChunks,
 });
