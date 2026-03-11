@@ -35,6 +35,7 @@ export const lensDocuments = defineTable({
   title: v.string(),
   authorName: v.optional(v.string()),
   sourceType: SourceType,
+  sourceUrl: v.optional(v.string()),
   originalText: v.string(),
   summary: v.string(),
   chunkCount: v.number(),

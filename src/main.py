@@ -16,6 +16,7 @@ from .api import notifications
 from .api import countries
 from .api import watchlist
 from .api import assets
+from .api import lenses
 from .clients.convex_client import get_client
 from .notifications.queue_processor import get_queue_processor
 from .modules.defianalyst.price_poller import get_price_poller
@@ -84,6 +85,8 @@ fast_api.include_router(countries.router, prefix="/api")
 fast_api.include_router(watchlist.router, prefix="/api")
 
 fast_api.include_router(assets.router, prefix="/api")
+
+fast_api.include_router(lenses.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():

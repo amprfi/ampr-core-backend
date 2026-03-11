@@ -210,24 +210,6 @@ export const getDocumentById = internalQuery({
   },
 });
 
-/**
- * Internal mutation to patch a document's originalText and storageId.
- * Called by importDocumentFromStorage action.
- */
-export const patchDocumentText = internalMutation({
-  args: {
-    documentId: v.id("lensDocuments"),
-    originalText: v.string(),
-    storageId: v.id("_storage"),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.documentId, {
-      originalText: args.originalText,
-      storageId: args.storageId,
-    });
-  },
-});
-
 // ============================================================================
 // ACTIONS
 // ============================================================================
@@ -362,145 +344,71 @@ export const searchByText = action({
 });
 
 /**
- * Import markdown content from a file in Convex storage into a document's
- * originalText field. Upload the .md file via the dashboard's file storage,
- * then call this action with the document ID and storage ID.
- */
-export const importDocumentFromStorage = action({
-  args: {
-    documentId: v.id("lensDocuments"),
-    storageId: v.id("_storage"),
-  },
-  handler: async (ctx, args) => {
-    const blob = await ctx.storage.get(args.storageId);
-    if (!blob) {
-      throw new Error("File not found in storage");
-    }
-
-    const text = await blob.text();
-
-    await ctx.runMutation(internal.lenses.patchDocumentText, {
-      documentId: args.documentId,
-      originalText: text,
-      storageId: args.storageId,
-    });
-
-    return { success: true, length: text.length };
-  },
-});
-
-/**
- * Ingest a document: chunk its originalText, embed via Mistral, and store
- * the chunks with their embeddings. Call this after a document has been
- * created (and its originalText populated) to make it searchable.
+ * Ingest a document from raw text: store the markdown in Convex storage,
+ * create the document record, chunk, embed, and write chunks.
  *
- * Updates the document's chunkCount when finished.
+ * Called by the Python API endpoint after fetching + cleaning a URL.
  */
-export const ingestDocument = action({
+export const ingestFromText = action({
   args: {
-    documentId: v.id("lensDocuments"),
+    lensId: v.id("lenses"),
+    title: v.string(),
+    authorName: v.optional(v.string()),
+    sourceType: SourceType,
+    sourceUrl: v.optional(v.string()),
+    summary: v.string(),
+    markdownText: v.string(),
+    publishedAt: v.optional(v.number()),
+    tags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    // 1. Fetch the document to get its text and parent lens.
-    const doc = await ctx.runQuery(internal.lenses.getDocumentById, {
-      id: args.documentId,
+    // 1. Store the markdown in Convex storage.
+    const blob = new Blob([args.markdownText], { type: "text/markdown" });
+    const storageId = await ctx.storage.store(blob);
+
+    // 2. Create the document record.
+    const documentId = await ctx.runMutation(internal.lenses.createDocumentInternal, {
+      lens: args.lensId,
+      title: args.title,
+      authorName: args.authorName,
+      sourceType: args.sourceType,
+      sourceUrl: args.sourceUrl,
+      originalText: args.markdownText,
+      summary: args.summary,
+      chunkCount: 0,
+      publishedAt: args.publishedAt,
+      storageId,
+      tags: args.tags,
     });
-    if (!doc) {
-      throw new Error("Document not found");
-    }
-    if (!doc.originalText || doc.originalText.trim().length === 0) {
-      throw new Error("Document has no originalText to ingest");
-    }
 
-    // 2. Chunk the text.
-    const chunks = chunkDocument(doc.originalText);
+    // 3. Chunk the text.
+    const chunks = chunkDocument(args.markdownText);
 
-    // 3. Embed all chunks via Mistral.
+    // 4. Embed all chunks via Mistral.
     const embeddings = await embedChunks(chunks);
 
-    // 4. Write chunks + embeddings to the database.
+    // 5. Write chunks + embeddings to the database.
     await ctx.runMutation(internal.lenses.createChunksBatch, {
       chunks: chunks.map((content, i) => ({
-        lens: doc.lens,
-        document: args.documentId,
+        lens: args.lensId,
+        document: documentId,
         content,
         chunkIndex: i,
         embedding: embeddings[i]!,
       })),
     });
 
-    // 5. Update the document's chunkCount.
+    // 6. Update the document's chunkCount.
     await ctx.runMutation(internal.lenses.patchChunkCount, {
-      documentId: args.documentId,
+      documentId,
       chunkCount: chunks.length,
     });
 
     return {
       success: true,
-      chunksCreated: chunks.length,
-    };
-  },
-});
-
-/**
- * Import from storage + ingest in one step. Upload a .md file to Convex
- * storage, create a document record (with summary, title, etc.), then call
- * this action to populate originalText, chunk, embed, and store — all at once.
- */
-export const importAndIngestDocument = action({
-  args: {
-    documentId: v.id("lensDocuments"),
-    storageId: v.id("_storage"),
-  },
-  handler: async (ctx, args) => {
-    // 1. Read file from storage.
-    const blob = await ctx.storage.get(args.storageId);
-    if (!blob) {
-      throw new Error("File not found in storage");
-    }
-    const text = await blob.text();
-
-    // 2. Save the text + storageId to the document.
-    await ctx.runMutation(internal.lenses.patchDocumentText, {
-      documentId: args.documentId,
-      originalText: text,
-      storageId: args.storageId,
-    });
-
-    // 3. Fetch the document to get the parent lens ID.
-    const doc = await ctx.runQuery(internal.lenses.getDocumentById, {
-      id: args.documentId,
-    });
-    if (!doc) {
-      throw new Error("Document not found after patching text");
-    }
-
-    // 4. Chunk the text.
-    const chunks = chunkDocument(text);
-
-    // 5. Embed all chunks via Mistral.
-    const embeddings = await embedChunks(chunks);
-
-    // 6. Write chunks + embeddings to the database.
-    await ctx.runMutation(internal.lenses.createChunksBatch, {
-      chunks: chunks.map((content, i) => ({
-        lens: doc.lens,
-        document: args.documentId,
-        content,
-        chunkIndex: i,
-        embedding: embeddings[i]!,
-      })),
-    });
-
-    // 7. Update the document's chunkCount.
-    await ctx.runMutation(internal.lenses.patchChunkCount, {
-      documentId: args.documentId,
-      chunkCount: chunks.length,
-    });
-
-    return {
-      success: true,
-      textLength: text.length,
+      documentId,
+      storageId,
+      textLength: args.markdownText.length,
       chunksCreated: chunks.length,
     };
   },
@@ -538,14 +446,16 @@ export const createLens = mutation({
 });
 
 /**
- * Create a document for a lens.
+ * Internal mutation to create a document (called by ingestFromText action).
+ * Returns just the document ID.
  */
-export const createDocument = mutation({
+export const createDocumentInternal = internalMutation({
   args: {
     lens: v.id("lenses"),
     title: v.string(),
     authorName: v.optional(v.string()),
     sourceType: SourceType,
+    sourceUrl: v.optional(v.string()),
     originalText: v.string(),
     summary: v.string(),
     chunkCount: v.number(),
@@ -558,51 +468,7 @@ export const createDocument = mutation({
     if (!lens) {
       throw new Error("Lens not found");
     }
-
-    const id = await ctx.db.insert("lensDocuments", args);
-    return await ctx.db.get(id);
-  },
-});
-
-/**
- * Create a chunk for a document.
- */
-export const createChunk = mutation({
-  args: {
-    lens: v.id("lenses"),
-    document: v.id("lensDocuments"),
-    content: v.string(),
-    chunkIndex: v.number(),
-    embedding: v.array(v.float64()),
-  },
-  handler: async (ctx, args) => {
-    const id = await ctx.db.insert("lensChunks", args);
-    return id;
-  },
-});
-
-/**
- * Batch create chunks for a document.
- */
-export const createChunks = mutation({
-  args: {
-    chunks: v.array(
-      v.object({
-        lens: v.id("lenses"),
-        document: v.id("lensDocuments"),
-        content: v.string(),
-        chunkIndex: v.number(),
-        embedding: v.array(v.float64()),
-      })
-    ),
-  },
-  handler: async (ctx, args) => {
-    const ids = [];
-    for (const chunk of args.chunks) {
-      const id = await ctx.db.insert("lensChunks", chunk);
-      ids.push(id);
-    }
-    return ids;
+    return await ctx.db.insert("lensDocuments", args);
   },
 });
 
