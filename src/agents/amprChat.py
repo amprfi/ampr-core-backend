@@ -19,6 +19,8 @@ class TalkerContext(BaseModel):
     date_context: str | None = None
     invoked_modules: list[str] = []
     module_already_invoked: bool = False  # True if &mention already triggered a module
+    channel: str | None = None
+    telegram_id: str | None = None
 
 agent = Agent(
     "mistral:mistral-large-latest",
@@ -130,6 +132,9 @@ async def call_specialist_module(
         logger.warning(f"Tool error: call_specialist_module - {error_msg}")
         return f"ERROR: {error_msg}"
 
+    # Send interim "working on it" message
+    await _send_tool_interim_message(ctx.deps, module_name, registry)
+
     try:
         result = await registry.invoke_module(
             module_name,
@@ -152,6 +157,28 @@ PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/ampr_chat.md").read_text()
 @agent.system_prompt
 async def get_system_prompt(ctx: RunContext[TalkerContext]) -> str:
     return PROMPT_TEMPLATE
+
+async def _send_tool_interim_message(deps: TalkerContext, module_name: str, registry) -> None:
+    """Send an interim message when amprChat invokes a module via tool call."""
+    try:
+        meta = registry.metadata.get(module_name, {})
+        display_name = meta.get("trigger", f"&{module_name}").lstrip("&")
+        interim_text = f"**{display_name}** 🔍 is working on this..."
+
+        if deps.channel == "telegram" and deps.telegram_id:
+            from ..clients.telegram_client import TelegramClient
+            telegram_client = TelegramClient()
+            await telegram_client.send_message(
+                chat_id=int(deps.telegram_id),
+                text=interim_text
+            )
+            await telegram_client.close()
+            logger.info(f"Sent interim message to Telegram {deps.telegram_id} for module '{module_name}'")
+        else:
+            logger.info(f"Interim message (channel '{deps.channel}'): {interim_text}")
+    except Exception as e:
+        logger.warning(f"Failed to send interim message for module '{module_name}': {e}")
+
 
 def get_amprChat_agent():
     return agent

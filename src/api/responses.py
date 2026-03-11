@@ -114,6 +114,10 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         if module_name:
             logger.info(f"Module '{module_name}' detected, invoking module")
+
+            # Send interim "working on it" message for real-time channels
+            await _send_interim_message(context, module_name, module_registry)
+
             try:
                 module_response = await module_registry.invoke_module(
                     module_name,
@@ -226,6 +230,8 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                 date_context=date_context_str,
                 invoked_modules=[module_name] if module_name else [],
                 module_already_invoked=module_name is not None,
+                channel=context.channel,
+                telegram_id=context.telegram_id,
             )
             result = await amprChat_agent.run(
                 context_str,
@@ -289,6 +295,40 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
     except Exception as e:
         logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
         raise
+
+async def _send_interim_message(context: ResponseContext, module_name: str, module_registry) -> None:
+    """
+    Send an interim "working on it" message to the user while a module processes.
+    Non-blocking — errors are logged but never propagated.
+    """
+    try:
+        # Build a user-friendly display name for the module
+        meta = module_registry.metadata.get(module_name, {})
+        display_name = meta.get("trigger", f"&{module_name}").lstrip("&")
+
+        # For lens modules, extract the specific lens name (e.g., "Proof-of-Words")
+        if module_name == "lens":
+            import re
+            match = re.search(r"&lens:(\S+)", context.message_content)
+            if match:
+                display_name = match.group(1)
+
+        interim_text = f"**{display_name}** 🔍 is working on this..."
+
+        if context.channel == "telegram" and context.telegram_id:
+            from ..clients.telegram_client import TelegramClient
+            telegram_client = TelegramClient()
+            await telegram_client.send_message(
+                chat_id=int(context.telegram_id),
+                text=interim_text
+            )
+            await telegram_client.close()
+            logger.info(f"Sent interim message to Telegram {context.telegram_id} for module '{module_name}'")
+        else:
+            logger.info(f"Interim message (non-Telegram channel '{context.channel}'): {interim_text}")
+    except Exception as e:
+        logger.warning(f"Failed to send interim message for module '{module_name}': {e}")
+
 
 async def _infer_watchlist(convex_client: ConvexClient, user_id: str, message: str):
     """
