@@ -132,8 +132,9 @@ async def call_specialist_module(
         logger.warning(f"Tool error: call_specialist_module - {error_msg}")
         return f"ERROR: {error_msg}"
 
-    # Send interim "working on it" message
-    await _send_tool_interim_message(ctx.deps, module_name, registry)
+    # Send interim "working on it" message (only on first invocation)
+    if module_name not in ctx.deps.invoked_modules:
+        await _send_tool_interim_message(ctx.deps, module_name, registry)
 
     try:
         result = await registry.invoke_module(

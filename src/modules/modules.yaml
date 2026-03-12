@@ -29,7 +29,7 @@ modules:
   - name: "lens"
     trigger: "&lens"
     path: "src.modules.lens"
-    enabled: true
+    enabled: false
     description: "RAG-powered author agent — search and interact with an author's indexed content"
     intents:
       - "author insights"

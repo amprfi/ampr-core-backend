@@ -7,6 +7,7 @@ the storage and delivery of those responses across different channels (SMS, chat
 
 import asyncio
 import logging
+import re
 from typing import Optional, Sequence
 from convex import ConvexClient
 import json
@@ -130,6 +131,20 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                 logger.error(error_msg, exc_info=True)
                 module_response = f"ERROR: {error_msg}"
 
+        # Detect unresolved module triggers (e.g., &lens, &foo — patterns not matched by any registered module)
+        interim_messages = []
+        mentioned_triggers = re.findall(r'&(\w+)', context.message_content)
+        unresolved_triggers = [
+            f"&{mention}" for mention in mentioned_triggers
+            if f"&{mention}" not in module_registry.triggers
+        ]
+
+        if unresolved_triggers:
+            triggers_list = ", ".join(unresolved_triggers)
+            not_found_text = f"The module {triggers_list} could not be found. I'll still try to answer your question."
+            await _send_interim_message(context, text=not_found_text)
+            interim_messages.append(not_found_text)
+
         # Check if user needs onboarding
         user = context.convex_client.query("users:getUser", {"userId": context.user_id})
         needs_onboarding = user and not user.get("onboarding_complete")
@@ -194,6 +209,16 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.
         """
         else:
+            # Build optional module-not-found section
+            module_not_found_section = ""
+            if unresolved_triggers:
+                triggers_list = ", ".join(unresolved_triggers)
+                module_not_found_section = f"""
+
+        [MODULE NOT FOUND]
+        The user attempted to invoke the following module(s) that could not be found: {triggers_list}
+        """
+
             context_str = f"""
         [LONG TERM MEMORY / SUMMARIES]
         The following are summaries of earlier conversation parts (chronological order):
@@ -206,7 +231,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         [CURRENT MESSAGE]
         Current message to respond to:
         {context.message_content}{date_context_section}
-        """
+        {module_not_found_section}"""
 
         # Get the agent response with enhanced context
         talker_context = None  # Track for module attribution
@@ -241,7 +266,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         # Extract the output from the AgentRunResult
         # Agents can return either a single string or a list of strings
         agent_output: str | list[str] = result.output
-        response_messages = agent_output if isinstance(agent_output, list) else [agent_output]
+        response_messages = interim_messages + (agent_output if isinstance(agent_output, list) else [agent_output])
 
         logger.info(f"Generated AI response: {response_messages}")
 
@@ -296,38 +321,41 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
         raise
 
-async def _send_interim_message(context: ResponseContext, module_name: str, module_registry) -> None:
+async def _send_interim_message(context: ResponseContext, module_name: str = None, module_registry=None, text: str = None) -> None:
     """
-    Send an interim "working on it" message to the user while a module processes.
+    Send an interim message to the user.
     Non-blocking — errors are logged but never propagated.
+
+    Either provide `text` directly, or `module_name` + `module_registry` to build
+    a "working on it" message for a specialist module.
     """
     try:
-        # Build a user-friendly display name for the module
-        meta = module_registry.metadata.get(module_name, {})
-        display_name = meta.get("trigger", f"&{module_name}").lstrip("&")
+        if text is None:
+            # Build a user-friendly display name for the module
+            meta = module_registry.metadata.get(module_name, {})
+            display_name = meta.get("trigger", f"&{module_name}").lstrip("&")
 
-        # For lens modules, extract the specific lens name (e.g., "Proof-of-Words")
-        if module_name == "lens":
-            import re
-            match = re.search(r"&lens:(\S+)", context.message_content)
-            if match:
-                display_name = match.group(1)
+            # For lens modules, extract the specific lens name (e.g., "Proof-of-Words")
+            if module_name == "lens":
+                match = re.search(r"&lens:(\S+)", context.message_content)
+                if match:
+                    display_name = match.group(1)
 
-        interim_text = f"**{display_name}** 🔍 is working on this..."
+            text = f"**{display_name}** 🔍 is working on this..."
 
         if context.channel == "telegram" and context.telegram_id:
             from ..clients.telegram_client import TelegramClient
             telegram_client = TelegramClient()
             await telegram_client.send_message(
                 chat_id=int(context.telegram_id),
-                text=interim_text
+                text=text
             )
             await telegram_client.close()
-            logger.info(f"Sent interim message to Telegram {context.telegram_id} for module '{module_name}'")
+            logger.info(f"Sent interim message to Telegram {context.telegram_id}: {text}")
         else:
-            logger.info(f"Interim message (non-Telegram channel '{context.channel}'): {interim_text}")
+            logger.info(f"Interim message (non-Telegram channel '{context.channel}'): {text}")
     except Exception as e:
-        logger.warning(f"Failed to send interim message for module '{module_name}': {e}")
+        logger.warning(f"Failed to send interim message: {e}")
 
 
 async def _infer_watchlist(convex_client: ConvexClient, user_id: str, message: str):
