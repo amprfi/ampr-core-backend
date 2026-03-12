@@ -8,23 +8,27 @@ modules:
     enabled: true
     description: "Cryptocurrency market data analyst powered by CoinGecko API"
     intents:
-      - "crypto prices"
-      - "token market cap"
-      - "trading volume"
-      - "historical prices"
-      - "top gainers/losers"
-      - "ATH/ATL data"
+      - "Current price, market cap, or 24h volume for any cryptocurrency or token"
+      - "Historical price data for a specific date (within last 365 days)"
+      - "Top performing coins — gainers or losers over 1h, 24h, 7d, 14d, 30d, 60d, or 1y"
+      - "Compare price performance between multiple cryptocurrencies over a date range"
+      - "Rank coins by market capitalization or fully diluted valuation (FDV)"
+      - "All-time high (ATH) or all-time low (ATL) data with dates and percentage changes"
+      - "Search for a coin by name or symbol"
+      - "Any question mentioning a specific token/coin name or symbol (e.g., BTC, ETH, SOL)"
+      - "Price alerts or notifications for a cryptocurrency (e.g., notify me when ETH hits $3k)"
 
   - name: "oracle"
     trigger: "&oracle"
     path: "src.modules.oracle"
     enabled: true
-    description: "Prediction markets specialist for economic and financial predictions"
+    description: "Prediction markets specialist powered by Polymarket data"
     intents:
-      - "prediction forecast"
-      - "event probabilities"
-      - "economic forecast"
-      - "macro predictions"
+      - "Probability or likelihood of a future event (elections, rate decisions, economic outcomes)"
+      - "Prediction market prices or odds for tracked events"
+      - "Will X happen? questions about future economic, political, or financial events"
+      - "Interest rate forecasts (e.g., Fed, ECB rate decisions)"
+      - "Macro-economic predictions and event probabilities"
 
   - name: "lens"
     trigger: "&lens"
@@ -32,6 +36,6 @@ modules:
     enabled: false
     description: "RAG-powered author agent — search and interact with an author's indexed content"
     intents:
-      - "author insights"
-      - "content search"
-      - "author perspective"
+      - "Search an author's writings, blogs, or newsletters by topic"
+      - "Get an author's opinion or analysis on a financial topic"
+      - "Quote or paraphrase from an author's indexed content"

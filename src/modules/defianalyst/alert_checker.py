@@ -13,6 +13,7 @@ import time
 from convex import ConvexClient
 
 from ...notifications.service import get_notification_service
+from .utils import format_price
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ class PriceAlertChecker:
         price = asset.get("current_price_usd")
 
         label = f"{name} ({ticker})" if ticker else name
-        price_str = f"${price:,.2f}" if price and price >= 0.01 else f"${price:.6f}" if price else "N/A"
+        price_str = format_price(price) if price else "N/A"
 
         # Determine which timeframe triggered and pick the most significant
         triggered_24h = pct_24h is not None and abs(pct_24h) >= threshold

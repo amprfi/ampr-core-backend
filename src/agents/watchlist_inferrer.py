@@ -7,6 +7,7 @@ import logging
 import re
 
 from ..modules.defianalyst.coingecko_client import CoinGeckoClient
+from ..modules.defianalyst.utils import is_asset_reference
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ def _scan_message_for_assets(message: str, asset_identifiers: list[dict]) -> lis
     """
     Scan a message for mentions of known assets by ticker or name.
     Returns a list of matched asset dicts (with _id, ticker, name).
+    Each dict gets an extra '_match_type' key: "ticker" or "name".
     Uses word-boundary matching to avoid false positives.
     """
     message_lower = message.lower()
@@ -94,7 +96,7 @@ def _scan_message_for_assets(message: str, asset_identifiers: list[dict]) -> lis
         if ticker and len(ticker) >= 2:
             pattern = r'\b' + re.escape(ticker) + r'\b'
             if re.search(pattern, message):
-                matched[asset_id] = asset
+                matched[asset_id] = {**asset, "_match_type": "ticker"}
                 continue
 
         # Check name match (word boundary, case-insensitive)
@@ -102,7 +104,7 @@ def _scan_message_for_assets(message: str, asset_identifiers: list[dict]) -> lis
         if name and len(name) >= 2:
             pattern = r'\b' + re.escape(name.lower()) + r'\b'
             if re.search(pattern, message_lower):
-                matched[asset_id] = asset
+                matched[asset_id] = {**asset, "_match_type": "name"}
 
     return list(matched.values())
 
@@ -134,6 +136,26 @@ async def infer_watchlist(convex_client: ConvexClient, user_id: str, message: st
 
     if not matched_assets:
         logger.info(f"No assets found in message for user {user_id}")
+        return "No assets mentioned."
+
+    # Filter out short name matches that are common words, not asset references
+    verified_assets = []
+    for asset in matched_assets:
+        name = asset.get("name", "")
+        if asset["_match_type"] == "name" and len(name) <= 5:
+            try:
+                is_ref = await is_asset_reference(message, name)
+                if not is_ref:
+                    logger.info(f"Filtered ambiguous name match '{name}' for user {user_id}")
+                    continue
+            except Exception as e:
+                logger.error(f"Asset reference check failed for '{name}': {e}")
+                continue
+        verified_assets.append(asset)
+    matched_assets = verified_assets
+
+    if not matched_assets:
+        logger.info(f"All matches filtered as common words for user {user_id}")
         return "No assets mentioned."
 
     asset_labels = [a.get("ticker") or a.get("name") or a["_id"] for a in matched_assets]

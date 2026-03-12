@@ -108,9 +108,7 @@ async def call_specialist_module(
     Call a specialist financial module when you need live or detailed data.
 
     Args:
-        module_name: The module to call. Available modules:
-            - "defianalyst": Cryptocurrency & token market data (prices, market caps, volumes, historical data)
-            - "oracle": Prediction market prices & probabilities (Polymarket data)
+        module_name: The name of the module to call. See system prompt for available modules.
         question: A focused description of what you want the module to answer,
             derived from the user's request.
 
@@ -157,7 +155,19 @@ PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/ampr_chat.md").read_text()
 
 @agent.system_prompt
 async def get_system_prompt(ctx: RunContext[TalkerContext]) -> str:
-    return PROMPT_TEMPLATE
+    registry = get_module_registry()
+    modules = registry.list_modules()
+
+    lines = ["You MUST call call_specialist_module when the user's message matches ANY of the intents listed below. Do NOT answer without calling the appropriate module first."]
+    for mod in modules:
+        intents = mod.get("intents", [])
+        lines.append(f'\n"{mod["name"]}": {mod["description"]}')
+        lines.append("  Call this module when the user's message involves:")
+        for intent in intents:
+            lines.append(f"  - {intent}")
+
+    specialist_modules_str = "\n".join(lines)
+    return PROMPT_TEMPLATE.format(specialist_modules=specialist_modules_str)
 
 async def _send_tool_interim_message(deps: TalkerContext, module_name: str, registry) -> None:
     """Send an interim message when amprChat invokes a module via tool call."""

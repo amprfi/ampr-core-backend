@@ -59,7 +59,7 @@ async def get_coin_price_and_market_data(
         coin_name = data.get("name", coin_id)
         coin_symbol = data.get("symbol", "").upper()
 
-        price_str = f"${price_usd:,.2f}" if isinstance(price_usd, (int, float)) else str(price_usd)
+        price_str = utils.format_price(price_usd) if isinstance(price_usd, (int, float)) else str(price_usd)
         mcap_str = f"${mcap_usd:,.0f}" if isinstance(mcap_usd, (int, float)) else str(mcap_usd)
         volume_str = f"${volume_usd:,.0f}" if isinstance(volume_usd, (int, float)) else str(volume_usd)
 
@@ -217,7 +217,7 @@ async def get_top_performing_coins(
             change = coin.get("price_change_percentage", 0)
             market_cap_rank = coin.get("market_cap_rank", "N/A")
 
-            price_str = f"${price:,.2f}" if price >= 0.01 else f"${price:.6f}"
+            price_str = utils.format_price(price)
             change_str = f"{change:+.2f}%"
             rank_str = f"#{market_cap_rank}" if market_cap_rank != "N/A" else "N/A"
 
@@ -393,7 +393,7 @@ async def get_coins_by_market_cap(
             market_cap = coin.get("market_cap", 0)
             rank = coin.get("market_cap_rank", i)
 
-            price_str = f"${price:,.2f}" if price >= 0.01 else f"${price:.6f}"
+            price_str = utils.format_price(price)
             mcap_str = f"${market_cap:,.0f}"
 
             lines.append(f"{rank}. {name} ({symbol}): {price_str}, Market Cap: {mcap_str}")
@@ -463,7 +463,7 @@ async def get_coins_by_fdv(
             fdv = coin.get("fully_diluted_valuation", 0)
             rank = coin.get("market_cap_rank", "N/A")
 
-            price_str = f"${price:,.2f}" if price >= 0.01 else f"${price:.6f}"
+            price_str = utils.format_price(price)
             fdv_str = f"${fdv:,.0f}"
             rank_str = f"#{rank}" if rank != "N/A" else "N/A"
 
@@ -522,11 +522,11 @@ async def get_coin_ath_atl(
         lines = [f"{coin_name} ({coin_symbol}) All-Time Data:"]
 
         if current_price is not None:
-            current_price_str = f"${current_price:,.2f}" if current_price >= 0.01 else f"${current_price:.6f}"
+            current_price_str = utils.format_price(current_price)
             lines.append(f"Current Price: {current_price_str}")
 
         if ath is not None:
-            ath_str = f"${ath:,.2f}" if ath >= 0.01 else f"${ath:.6f}"
+            ath_str = utils.format_price(ath)
             ath_date_str = ath_date[:10] if ath_date else "Unknown"
             lines.append(f"All-Time High: {ath_str} on {ath_date_str}")
 
@@ -534,7 +534,7 @@ async def get_coin_ath_atl(
                 lines.append(f"Down {abs(ath_change_pct):.2f}% from ATH")
 
         if atl is not None:
-            atl_str = f"${atl:,.2f}" if atl >= 0.01 else f"${atl:.6f}"
+            atl_str = utils.format_price(atl)
             atl_date_str = atl_date[:10] if atl_date else "Unknown"
             lines.append(f"All-Time Low: {atl_str} on {atl_date_str}")
 
