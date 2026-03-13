@@ -200,6 +200,12 @@ async def infer_watchlist(convex_client: ConvexClient, user_id: str, message: st
                     except Exception as e:
                         logger.error(f"Error creating priceFeedMapping for {asset_label}: {e}")
 
+            # Stamp last_mentioned_at on every mention (resets 30-day expiration clock)
+            convex_client.mutation("portfolioItems:stampMentioned", {
+                "user": user_id,
+                "asset": asset_id,
+            })
+
             # Check current status — never modify owned assets
             existing = convex_client.query("portfolioItems:getPortfolioItem", {
                 "user": user_id,
@@ -223,8 +229,54 @@ async def infer_watchlist(convex_client: ConvexClient, user_id: str, message: st
                 })
                 logger.info(f"Inferred watch for {asset_label}: {result.get('asset_status')}")
 
+            # Auto-associate notification_modules for crypto assets on watchlist
+            new_status = result.get("asset_status") if result else None
+            if new_status in ("stated watch", "inferred watch") and full_asset:
+                await _auto_associate_notification_modules(
+                    convex_client, user_id, asset_id, full_asset
+                )
+
         except Exception as e:
             logger.error(f"Error tracking asset {asset_label}: {e}")
 
     action = "Watched" if is_explicit else "Tracked"
     return f"{action} {', '.join(asset_labels)}"
+
+
+async def _auto_associate_notification_modules(
+    convex_client: ConvexClient,
+    user_id: str,
+    asset_id: str,
+    asset: dict,
+) -> None:
+    """
+    Auto-associate notification modules on a portfolioItem based on asset category.
+    Crypto assets with price_feed="defianalyst" get the defianalyst module associated,
+    and default alert registrations are created via the module's register_notifications().
+    """
+    if asset.get("asset_category") != "cryptotoken" or asset.get("price_feed") != "defianalyst":
+        return
+
+    try:
+        module_record = convex_client.query("notifications:getModuleByName", {"name": "defianalyst"})
+        if not module_record:
+            logger.warning("defianalyst module not registered, skipping notification_modules association")
+            return
+
+        convex_client.mutation("portfolioItems:addNotificationModule", {
+            "user": user_id,
+            "asset": asset_id,
+            "module": module_record["_id"],
+        })
+        logger.info(f"Auto-associated defianalyst module for asset {asset_id}")
+
+        # Create default alert registrations via the module
+        from ..modules.registry import get_module_registry
+        module_instance = get_module_registry().get_module("defianalyst")
+        if module_instance and hasattr(module_instance, "register_notifications"):
+            await module_instance.register_notifications(user_id, asset_id)
+        else:
+            logger.warning("defianalyst module instance not found in registry, skipping alert registration")
+
+    except Exception as e:
+        logger.error(f"Error auto-associating notification module for asset {asset_id}: {e}")

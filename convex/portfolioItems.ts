@@ -165,10 +165,11 @@ export const addToWatchlist = mutation({
 
 /**
  * Add an inferred watch (called by AI when user mentions an asset).
- * Four-step promotion:
+ * Uses a 7-day rolling window for promotion:
  * - If no existing item, creates with "pending inferred watch" (mention_count = 1).
- * - If existing "pending inferred watch", increments mention count.
- * - When mention count reaches 4, upgrades to "inferred watch".
+ * - If existing "pending inferred watch" and first_mention_at is within 7 days,
+ *   increments mention count. When count reaches 3, upgrades to "inferred watch".
+ * - If first_mention_at is older than 7 days, resets the window (count = 1).
  * - If already "inferred watch", "stated watch", or "owned", no-op.
  */
 export const addInferredWatch = mutation({
@@ -177,6 +178,9 @@ export const addInferredWatch = mutation({
     asset: v.id("assets"),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
     const existing = await ctx.db
       .query("portfolioItems")
       .withIndex("by_user_asset", (q) =>
@@ -186,8 +190,20 @@ export const addInferredWatch = mutation({
 
     if (existing) {
       if (existing.asset_status === "pending inferred watch") {
+        const firstMention = existing.first_mention_at ?? existing._creationTime;
+        const windowExpired = (now - firstMention) > sevenDaysMs;
+
+        if (windowExpired) {
+          // Reset rolling window
+          await ctx.db.patch(existing._id, {
+            inferred_mention_count: 1,
+            first_mention_at: now,
+          });
+          return { ...existing, inferred_mention_count: 1, first_mention_at: now };
+        }
+
         const newCount = (existing.inferred_mention_count ?? 1) + 1;
-        if (newCount >= 4) {
+        if (newCount >= 3) {
           await ctx.db.patch(existing._id, {
             asset_status: "inferred watch",
             inferred_mention_count: newCount,
@@ -205,6 +221,7 @@ export const addInferredWatch = mutation({
       asset: args.asset,
       asset_status: "pending inferred watch",
       inferred_mention_count: 1,
+      first_mention_at: now,
     });
 
     return await ctx.db.get(id);
@@ -288,5 +305,112 @@ export const updateAssetStatus = mutation({
 
     await ctx.db.patch(existing._id, { asset_status: args.asset_status });
     return await ctx.db.get(existing._id);
+  },
+});
+
+/**
+ * Update last_mentioned_at timestamp for an asset interest.
+ * Called by the watchlist inferrer on every mention.
+ */
+export const stampMentioned = mutation({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, { last_mentioned_at: Date.now() });
+    }
+  },
+});
+
+/**
+ * Add a module to an interest's notification_modules array.
+ * Idempotent — skips if module already present.
+ */
+export const addNotificationModule = mutation({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+    module: v.id("modules"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+
+    if (!existing) {
+      throw new Error("Portfolio item not found");
+    }
+
+    const modules = existing.notification_modules ?? [];
+    if (modules.includes(args.module)) {
+      return existing._id;
+    }
+
+    await ctx.db.patch(existing._id, {
+      notification_modules: [...modules, args.module],
+    });
+    return existing._id;
+  },
+});
+
+/**
+ * Remove a module from an interest's notification_modules array.
+ */
+export const removeNotificationModule = mutation({
+  args: {
+    user: v.id("users"),
+    asset: v.id("assets"),
+    module: v.id("modules"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("portfolioItems")
+      .withIndex("by_user_asset", (q) =>
+        q.eq("user", args.user).eq("asset", args.asset)
+      )
+      .unique();
+
+    if (!existing) {
+      return;
+    }
+
+    const modules = existing.notification_modules ?? [];
+    await ctx.db.patch(existing._id, {
+      notification_modules: modules.filter((m) => m !== args.module),
+    });
+  },
+});
+
+/**
+ * Get expired inferred watches — inferred watches not mentioned in the last 30 days.
+ * Used by the expiration background job.
+ */
+export const getExpiredInferredWatches = query({
+  args: {},
+  handler: async (ctx) => {
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    const inferredItems = await ctx.db
+      .query("portfolioItems")
+      .collect();
+
+    return inferredItems.filter(
+      (item) =>
+        item.asset_status === "inferred watch" &&
+        (item.last_mentioned_at === undefined ||
+          item.last_mentioned_at < thirtyDaysAgo)
+    );
   },
 });

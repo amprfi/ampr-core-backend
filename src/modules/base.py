@@ -14,6 +14,7 @@ class NotificationTypeConfig:
     name: str
     description: str
     default_enabled: bool = True
+    priority: str = "medium"  # "low", "medium", or "high"
 
 
 class ModuleInterface(Protocol):
@@ -93,15 +94,30 @@ class BaseModule(ABC):
         self._module_id = module_id
         logger.info(f"Registered module '{self.name}' with ID: {module_id}")
 
+        from .registry import get_module_registry
+
         for type_config in self.get_notification_types():
             type_id = convex_client.mutation("notifications:registerNotificationType", {
                 "module": module_id,
                 "name": type_config.name,
                 "description": type_config.description,
                 "default_enabled": type_config.default_enabled,
+                "priority": type_config.priority,
             })
             self._notification_types[type_config.name] = type_id
             logger.info(f"Registered notification type '{type_config.name}' with ID: {type_id}")
+
+            # Auto-sync to modules.yaml
+            try:
+                registry = get_module_registry()
+                registry.sync_notification_type_to_yaml(self.name, {
+                    "name": type_config.name,
+                    "description": type_config.description,
+                    "default_enabled": type_config.default_enabled,
+                    "priority": type_config.priority,
+                })
+            except Exception as e:
+                logger.warning(f"Failed to sync notification type to YAML: {e}")
 
         return module_id
 
@@ -162,6 +178,26 @@ class BaseModule(ABC):
         )
 
         return result.success
+
+    async def register_notifications(self, user_id: str, asset_id: str) -> None:
+        """
+        Create default notification registrations for a user+asset.
+        Called when an asset is added to a watchlist (stated or inferred watch).
+
+        Override in subclasses to create module-specific alert data.
+        Default implementation is a no-op for modules without notifications.
+        """
+        pass
+
+    async def deregister_notifications(self, user_id: str, asset_id: str) -> None:
+        """
+        Clean up notification registrations for a user+asset.
+        Called by the interest expiration job when an inferred watch expires.
+
+        Override in subclasses to remove module-specific alert data.
+        Default implementation is a no-op for modules without notifications.
+        """
+        pass
 
     @abstractmethod
     async def invoke(self, message: str, date_context: Optional[str] = None) -> str:

@@ -133,7 +133,7 @@ class PricePoller:
             logger.error(f"Alert checker error: {e}", exc_info=True)
 
     def _init_alert_checker(self) -> Optional[PriceAlertChecker]:
-        """Resolve the defianalyst module and price_alert notification type IDs."""
+        """Resolve the defianalyst module and notification type IDs."""
         try:
             module = self.convex.query(
                 "notifications:getModuleByName", {"name": "defianalyst"}
@@ -143,15 +143,25 @@ class PricePoller:
                 return None
 
             module_id = module["_id"]
-            notif_type = self.convex.query(
-                "notifications:getNotificationTypeByName",
-                {"module": module_id, "name": "price_alert"},
-            )
-            if not notif_type:
-                logger.warning("price_alert notification type not registered, alerts disabled")
+
+            type_names = ["price_change_24h", "price_change_7d", "price_threshold"]
+            notification_type_ids: dict[str, str] = {}
+
+            for name in type_names:
+                notif_type = self.convex.query(
+                    "notifications:getNotificationTypeByName",
+                    {"module": module_id, "name": name},
+                )
+                if notif_type:
+                    notification_type_ids[name] = notif_type["_id"]
+                else:
+                    logger.warning(f"Notification type '{name}' not registered")
+
+            if not notification_type_ids:
+                logger.warning("No notification types registered, alerts disabled")
                 return None
 
-            return PriceAlertChecker(self.convex, module_id, notif_type["_id"])
+            return PriceAlertChecker(self.convex, module_id, notification_type_ids)
         except Exception as e:
             logger.error(f"Failed to initialize alert checker: {e}", exc_info=True)
             return None

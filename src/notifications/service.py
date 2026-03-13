@@ -48,6 +48,7 @@ class NotificationService:
         notification_type_id: str,
         content: str,
         asset_ref: Optional[str] = None,
+        priority: Optional[str] = None,
     ) -> NotificationResult:
         """
         Send a notification to a user.
@@ -63,6 +64,8 @@ class NotificationService:
             notification_type_id: Convex notification type ID
             content: Notification message content
             asset_ref: Optional Convex asset ID for overnight deduplication
+            priority: Override priority ("low", "medium", "high"). If None,
+                resolved from the notification type's default priority.
             
         Returns:
             NotificationResult with delivery status
@@ -81,6 +84,13 @@ class NotificationService:
                     delivered=False,
                     error="Notification disabled by user preference"
                 )
+            
+            # Resolve priority from notification type if not explicitly provided
+            if priority is None:
+                notif_type = self.convex.query("notifications:getNotificationType", {
+                    "id": notification_type_id,
+                })
+                priority = notif_type.get("priority", "medium") if notif_type else "medium"
             
             user = self.convex.query("users:getUser", {"userId": user_id})
             if not user:
@@ -114,6 +124,7 @@ class NotificationService:
                     notification_type_id=notification_type_id,
                     content=content,
                     scheduled_for_ms=scheduled_for_ms,
+                    priority=priority,
                     asset_ref=asset_ref,
                 )
                 
@@ -184,6 +195,7 @@ class NotificationService:
         notification_type_id: str,
         content: str,
         scheduled_for_ms: int,
+        priority: str = "medium",
         asset_ref: Optional[str] = None,
     ) -> NotificationResult:
         """Queue notification for later delivery."""
@@ -193,6 +205,7 @@ class NotificationService:
             "notification_type": notification_type_id,
             "content": content,
             "scheduled_for": scheduled_for_ms,
+            "priority": priority,
         }
         if asset_ref is not None:
             args["asset_ref"] = asset_ref
@@ -226,70 +239,6 @@ class NotificationService:
         # TODO: Implement SMS sending via Vonage
         logger.warning("SMS sending not yet implemented")
         return False
-    
-    async def process_queued_notification(self, queue_item: dict) -> bool:
-        """
-        Process a single queued notification.
-        
-        Called by the queue processor for each pending item.
-        
-        Args:
-            queue_item: Notification queue record from Convex
-            
-        Returns:
-            True if successfully delivered
-        """
-        queue_id = queue_item["_id"]
-        user_id = queue_item["user"]
-        module_id = queue_item["module"]
-        notification_type_id = queue_item["notification_type"]
-        content = queue_item["content"]
-        
-        self.convex.mutation("notifications:updateNotificationStatus", {
-            "id": queue_id,
-            "status": "sending",
-        })
-        
-        try:
-            user = self.convex.query("users:getUser", {"userId": user_id})
-            if not user:
-                self.convex.mutation("notifications:updateNotificationStatus", {
-                    "id": queue_id,
-                    "status": "failed",
-                    "last_error": "User not found",
-                })
-                return False
-            
-            result = await self._deliver_now(
-                user_id=user_id,
-                user=user,
-                module_id=module_id,
-                notification_type_id=notification_type_id,
-                content=content,
-            )
-            
-            if result.delivered:
-                self.convex.mutation("notifications:updateNotificationStatus", {
-                    "id": queue_id,
-                    "status": "sent",
-                })
-                return True
-            else:
-                self.convex.mutation("notifications:updateNotificationStatus", {
-                    "id": queue_id,
-                    "status": "failed",
-                    "last_error": result.error or "Delivery failed",
-                })
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error processing queued notification {queue_id}: {e}")
-            self.convex.mutation("notifications:updateNotificationStatus", {
-                "id": queue_id,
-                "status": "failed",
-                "last_error": str(e),
-            })
-            return False
 
 
 _service_instance: Optional[NotificationService] = None

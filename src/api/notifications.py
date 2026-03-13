@@ -91,6 +91,7 @@ class RegisterNotificationTypeRequest(BaseModel):
     name: str
     description: str
     default_enabled: bool = True
+    priority: str = "medium"
 
 
 @router.post("/modules/register")
@@ -131,6 +132,7 @@ async def register_notification_type(request: RegisterNotificationTypeRequest):
             "name": request.name,
             "description": request.description,
             "default_enabled": request.default_enabled,
+            "priority": request.priority,
         })
         
         return {"notification_type_id": type_id}

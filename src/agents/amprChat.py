@@ -2,7 +2,7 @@ from pathlib import Path
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, ConfigDict
 from convex import ConvexClient
-from typing import List, Dict
+from typing import List, Dict, Optional
 import logging
 
 from pydantic_ai.agent.abstract import RunOutputDataT
@@ -150,6 +150,223 @@ async def call_specialist_module(
         error_msg = f"Module '{module_name}' failed: {str(e)}"
         logger.error(f"Tool error: call_specialist_module - {error_msg}", exc_info=True)
         return f"ERROR: {error_msg}"
+
+@agent.tool
+async def manage_notification_preferences(
+    ctx: RunContext[TalkerContext],
+    action: str,
+    module_name: Optional[str] = None,
+    enabled: Optional[bool] = None,
+) -> str:
+    """
+    Manage the user's notification preferences (global or per-module on/off).
+
+    Args:
+        action: One of "get_status", "set_global", "set_module".
+            - "get_status": Get current notification preferences.
+            - "set_global": Enable or disable ALL notifications.
+            - "set_module": Enable or disable notifications for a specific module.
+        module_name: Required for "set_module". The module name (e.g., "defianalyst").
+        enabled: Required for "set_global" and "set_module". True to enable, False to disable.
+
+    Returns:
+        Status message describing the result.
+    """
+    logger.info(f"Tool called: manage_notification_preferences action={action} module_name={module_name} enabled={enabled}")
+    convex = ctx.deps.convex_client
+    user_id = ctx.deps.user_id
+
+    try:
+        if action == "get_status":
+            prefs = convex.query("notifications:getUserPreferences", {"user": user_id})
+            if not prefs:
+                return "No custom notification preferences set. All notifications use default settings."
+
+            lines = []
+            for pref in prefs:
+                scope = "Global"
+                if pref.get("module"):
+                    module = convex.query("notifications:getModule", {"id": pref["module"]})
+                    scope = f"Module: {module.get('name', 'unknown')}" if module else "Module: unknown"
+                status = "enabled" if pref.get("enabled") else "disabled"
+                lines.append(f"- {scope}: {status}")
+            return "Current notification preferences:\n" + "\n".join(lines)
+
+        elif action == "set_global":
+            if enabled is None:
+                return "ERROR: 'enabled' parameter is required for set_global."
+            convex.mutation("notifications:setGlobalNotificationPreference", {
+                "user": user_id,
+                "enabled": enabled,
+            })
+            status = "enabled" if enabled else "disabled"
+            return f"All notifications have been {status}."
+
+        elif action == "set_module":
+            if not module_name:
+                return "ERROR: 'module_name' parameter is required for set_module."
+            if enabled is None:
+                return "ERROR: 'enabled' parameter is required for set_module."
+
+            module = convex.query("notifications:getModuleByName", {"name": module_name})
+            if not module:
+                return f"ERROR: Module '{module_name}' not found."
+
+            convex.mutation("notifications:setModuleNotificationPreference", {
+                "user": user_id,
+                "module": module["_id"],
+                "enabled": enabled,
+            })
+            status = "enabled" if enabled else "disabled"
+            return f"Notifications from {module_name} have been {status}."
+
+        else:
+            return f"ERROR: Unknown action '{action}'. Use 'get_status', 'set_global', or 'set_module'."
+
+    except Exception as e:
+        error_msg = f"Error managing notification preferences: {str(e)}"
+        logger.error(f"Tool error: manage_notification_preferences - {error_msg}")
+        return f"ERROR: {error_msg}"
+
+
+@agent.tool
+async def manage_price_alert(
+    ctx: RunContext[TalkerContext],
+    action: str,
+    asset_name: str,
+    alert_kind: Optional[str] = None,
+    threshold_pct: Optional[float] = None,
+    target_price: Optional[float] = None,
+    direction: Optional[str] = None,
+) -> str:
+    """
+    Manage price alerts for a cryptocurrency asset (DeFiAnalyst module).
+
+    Args:
+        action: One of "set", "remove", "list".
+            - "set": Create or update a price alert.
+            - "remove": Remove price alerts for an asset.
+            - "list": List the user's active price alerts.
+        asset_name: The asset ticker or name (e.g., "BTC", "Ethereum").
+            For "list", pass "all" to show all alerts.
+        alert_kind: Required for "set". One of:
+            - "percentage_24h": Alert when 24h price change exceeds threshold.
+            - "percentage_7d": Alert when 7d price change exceeds threshold.
+            - "absolute_price": Alert when price crosses a specific target.
+        threshold_pct: Required for percentage alerts. The threshold percentage (e.g., 5.0 for 5%).
+        target_price: Required for absolute_price alerts. The target price in USD.
+        direction: Required for absolute_price alerts. "above" or "below".
+
+    Returns:
+        Status message describing the result.
+    """
+    logger.info(f"Tool called: manage_price_alert action={action}, asset={asset_name}")
+    convex = ctx.deps.convex_client
+    user_id = ctx.deps.user_id
+
+    try:
+        if action == "list":
+            alerts = convex.query("priceAlerts:getUserAlerts", {"user": user_id})
+            if not alerts:
+                return "You have no active price alerts."
+
+            lines = []
+            for alert in alerts:
+                asset = convex.query("assets:getAsset", {"id": alert["asset"]}) if alert.get("asset") else None
+                label = f"{asset.get('name', '')} ({asset.get('ticker', '')})" if asset else "Default"
+
+                if alert["alert_kind"] == "absolute_price":
+                    lines.append(f"- {label}: alert when price goes {alert.get('direction')} ${alert.get('target_price')}")
+                else:
+                    period = "24h" if alert["alert_kind"] == "percentage_24h" else "7d"
+                    lines.append(f"- {label}: {period} change exceeds {alert.get('threshold_pct')}%")
+
+            return "Your active price alerts:\n" + "\n".join(lines)
+
+        # Resolve asset
+        asset = convex.query("assets:getAssetByTickerOrName", {"query": asset_name})
+        if not asset:
+            return f"ERROR: Asset '{asset_name}' not found."
+
+        asset_id = asset["_id"]
+
+        if action == "remove":
+            removed = convex.mutation("priceAlerts:removeAlertsByUserAsset", {
+                "user": user_id,
+                "asset": asset_id,
+            })
+            label = f"{asset.get('name', '')} ({asset.get('ticker', '')})"
+            return f"Removed {removed} price alert(s) for {label}."
+
+        elif action == "set":
+            if not alert_kind:
+                return "ERROR: 'alert_kind' is required. Use 'percentage_24h', 'percentage_7d', or 'absolute_price'."
+
+            # Resolve notification type
+            module = convex.query("notifications:getModuleByName", {"name": "defianalyst"})
+            if not module:
+                return "ERROR: DeFiAnalyst module not registered."
+
+            if alert_kind == "absolute_price":
+                if target_price is None or not direction:
+                    return "ERROR: 'target_price' and 'direction' are required for absolute price alerts."
+
+                current_price = asset.get("current_price_usd")
+                if current_price is None:
+                    return f"ERROR: No current price available for {asset.get('name', asset_name)}."
+
+                type_name = "price_threshold"
+                notif_type = convex.query("notifications:getNotificationTypeByName", {
+                    "module": module["_id"],
+                    "name": type_name,
+                })
+                if not notif_type:
+                    return "ERROR: Notification type 'price_threshold' not registered."
+
+                convex.mutation("priceAlerts:createAbsolutePriceAlert", {
+                    "user": user_id,
+                    "asset": asset_id,
+                    "notification_type": notif_type["_id"],
+                    "direction": direction,
+                    "target_price": target_price,
+                    "current_price": current_price,
+                })
+
+                label = f"{asset.get('name', '')} ({asset.get('ticker', '')})"
+                return f"Price alert set: you'll be notified when {label} goes {direction} ${target_price}."
+
+            else:
+                if threshold_pct is None:
+                    return "ERROR: 'threshold_pct' is required for percentage alerts."
+
+                type_name = "price_change_24h" if alert_kind == "percentage_24h" else "price_change_7d"
+                notif_type = convex.query("notifications:getNotificationTypeByName", {
+                    "module": module["_id"],
+                    "name": type_name,
+                })
+                if not notif_type:
+                    return f"ERROR: Notification type '{type_name}' not registered."
+
+                convex.mutation("priceAlerts:setPercentageThreshold", {
+                    "user": user_id,
+                    "asset": asset_id,
+                    "alert_kind": alert_kind,
+                    "notification_type": notif_type["_id"],
+                    "threshold_pct": threshold_pct,
+                })
+
+                label = f"{asset.get('name', '')} ({asset.get('ticker', '')})"
+                period = "24-hour" if alert_kind == "percentage_24h" else "7-day"
+                return f"Alert set: you'll be notified when {label}'s {period} price change exceeds {threshold_pct}%."
+
+        else:
+            return f"ERROR: Unknown action '{action}'. Use 'set', 'remove', or 'list'."
+
+    except Exception as e:
+        error_msg = f"Error managing price alert: {str(e)}"
+        logger.error(f"Tool error: manage_price_alert - {error_msg}")
+        return f"ERROR: {error_msg}"
+
 
 PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/ampr_chat.md").read_text()
 

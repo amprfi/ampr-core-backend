@@ -44,6 +44,29 @@ export const searchAssetByName = query({
 });
 
 /**
+ * Get an asset by ticker or name.
+ * Tries exact ticker match first, then falls back to name search.
+ */
+export const getAssetByTickerOrName = query({
+  args: { query: v.string() },
+  handler: async (ctx, args) => {
+    // Try ticker match first
+    const byTicker = await ctx.db
+      .query("assets")
+      .withIndex("by_ticker", (q) => q.eq("ticker", args.query.toUpperCase()))
+      .first();
+
+    if (byTicker) return byTicker;
+
+    // Fall back to name search
+    return await ctx.db
+      .query("assets")
+      .withSearchIndex("search_name", (q) => q.search("name", args.query))
+      .first();
+  },
+});
+
+/**
  * Get all asset identifiers (ticker and name) for message scanning.
  * Returns minimal data to keep the payload small.
  */

@@ -48,7 +48,8 @@ class ModuleRegistry:
                     trigger=module_config['trigger'],
                     path=module_config['path'],
                     description=module_config.get('description', ''),
-                    intents=module_config.get('intents', [])
+                    intents=module_config.get('intents', []),
+                    notification_types=module_config.get('notification_types', []),
                 )
 
             logger.info(f"Loaded {len(self.modules)} module(s) from registry")
@@ -58,7 +59,15 @@ class ModuleRegistry:
         except Exception as e:
             logger.error(f"Error loading modules: {str(e)}", exc_info=True)
 
-    def _register_module(self, name: str, trigger: str, path: str, description: str = "", intents: List[str] = None):
+    def _register_module(
+        self,
+        name: str,
+        trigger: str,
+        path: str,
+        description: str = "",
+        intents: List[str] = None,
+        notification_types: List[Dict] = None,
+    ):
         """
         Register a single module.
 
@@ -68,6 +77,7 @@ class ModuleRegistry:
             path: Python import path (e.g., "src.modules.defianalyst")
             description: Human-readable description of the module
             intents: List of intent keywords the module handles
+            notification_types: Notification type definitions from modules.yaml
         """
         try:
             module = import_module(f"{path}.agent")
@@ -85,6 +95,7 @@ class ModuleRegistry:
                 "description": description,
                 "intents": intents or [],
                 "trigger": trigger,
+                "notification_types": notification_types or [],
             }
 
             logger.info(f"Registered module: {name} with trigger: {trigger}")
@@ -158,8 +169,64 @@ class ModuleRegistry:
                 "trigger": module.trigger,
                 "description": meta.get("description", ""),
                 "intents": meta.get("intents", []),
+                "notification_types": meta.get("notification_types", []),
             })
         return result
+
+
+    def get_notification_types_for_module(self, name: str) -> List[Dict]:
+        """
+        Get notification type definitions for a module from modules.yaml metadata.
+        Used by amprChat to know what notification capabilities a module has
+        without making a DB call.
+        """
+        meta = self.metadata.get(name, {})
+        return meta.get("notification_types", [])
+
+    def sync_notification_type_to_yaml(
+        self, module_name: str, notification_type: Dict
+    ):
+        """
+        Sync a newly registered notification type back to modules.yaml.
+        Called after runtime registration to keep the YAML source of truth
+        up to date.
+
+        Args:
+            module_name: The module name (e.g., "defianalyst")
+            notification_type: Dict with name, description, default_enabled, priority
+        """
+        try:
+            with open(self.config_path, "r") as f:
+                config = yaml.safe_load(f) or {}
+
+            modules_list = config.get("modules", [])
+            for module_config in modules_list:
+                if module_config.get("name") != module_name:
+                    continue
+
+                existing_types = module_config.setdefault("notification_types", [])
+                existing_names = {t["name"] for t in existing_types}
+
+                if notification_type["name"] not in existing_names:
+                    existing_types.append(notification_type)
+
+                    with open(self.config_path, "w") as f:
+                        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+                    # Update in-memory metadata
+                    if module_name in self.metadata:
+                        self.metadata[module_name].setdefault("notification_types", []).append(
+                            notification_type
+                        )
+
+                    logger.info(
+                        f"Synced notification type '{notification_type['name']}' "
+                        f"to modules.yaml for module '{module_name}'"
+                    )
+                break
+
+        except Exception as e:
+            logger.error(f"Failed to sync notification type to modules.yaml: {e}")
 
 
 _registry_instance: Optional[ModuleRegistry] = None

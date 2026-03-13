@@ -9,7 +9,7 @@ import { notificationTypes, notificationPreferences, notificationQueue } from ".
 import { countries } from "./tables/countries";
 import { predictionEvents } from "./tables/predictionEvents";
 import { priceFeedMappings } from "./tables/priceFeedMappings";
-import { alertThresholds } from "./tables/alertThresholds";
+import { priceAlerts } from "./tables/priceAlerts";
 import { lenses, lensDocuments, lensChunks } from "./tables/lenses";
 
 export default defineSchema({
@@ -27,7 +27,7 @@ export default defineSchema({
   countries,
   predictionEvents,
   priceFeedMappings,
-  alertThresholds,
+  priceAlerts,
   lenses,
   lensDocuments,
   lensChunks,

@@ -17,6 +17,19 @@ modules:
       - "Search for a coin by name or symbol"
       - "Any question mentioning a specific token/coin name or symbol (e.g., BTC, ETH, SOL)"
       - "Price alerts or notifications for a cryptocurrency (e.g., notify me when ETH hits $3k)"
+    notification_types:
+      - name: "price_change_24h"
+        description: "24-hour price change exceeds threshold"
+        default_enabled: true
+        priority: "medium"
+      - name: "price_change_7d"
+        description: "7-day price change exceeds threshold"
+        default_enabled: true
+        priority: "medium"
+      - name: "price_threshold"
+        description: "Asset crosses a specific price target"
+        default_enabled: true
+        priority: "high"
 
   - name: "oracle"
     trigger: "&oracle"

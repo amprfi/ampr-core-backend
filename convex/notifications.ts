@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { NotificationQueueStatus } from "./tables/notifications";
+import { NotificationQueueStatus, NotificationPriority } from "./tables/notifications";
 
 // ============================================================================
 // MODULES REGISTRY
@@ -80,6 +80,7 @@ export const registerNotificationType = mutation({
     name: v.string(),
     description: v.string(),
     default_enabled: v.boolean(),
+    priority: NotificationPriority,
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -93,6 +94,7 @@ export const registerNotificationType = mutation({
       await ctx.db.patch(existing._id, {
         description: args.description,
         default_enabled: args.default_enabled,
+        priority: args.priority,
       });
       return existing._id;
     }
@@ -359,12 +361,14 @@ export const enqueueNotification = mutation({
     notification_type: v.id("notificationTypes"),
     content: v.string(),
     scheduled_for: v.number(),
+    priority: NotificationPriority,
     asset_ref: v.optional(v.id("assets")),
   },
   handler: async (ctx, args) => {
     // Deduplicate: if an asset_ref is provided, upsert any existing pending
     // notification for the same user + notification_type + asset so that only
     // the most recent content is delivered after the overnight pause.
+    // A higher priority update replaces a lower priority pending notification.
     if (args.asset_ref) {
       const existing = await ctx.db
         .query("notificationQueue")
@@ -378,9 +382,15 @@ export const enqueueNotification = mutation({
         .first();
 
       if (existing) {
+        const priorityRank = { low: 0, medium: 1, high: 2 };
+        const newPriority = priorityRank[args.priority] >= priorityRank[existing.priority]
+          ? args.priority
+          : existing.priority;
+
         await ctx.db.patch(existing._id, {
           content: args.content,
           scheduled_for: args.scheduled_for,
+          priority: newPriority,
         });
         return existing._id;
       }
@@ -409,6 +419,29 @@ export const getPendingNotifications = query({
         q.eq("status", "pending").lte("scheduled_for", now)
       )
       .take(limit);
+  },
+});
+
+/**
+ * Get pending notifications for a specific user and module, for synthesis.
+ * Returns all pending-and-due items grouped for LLM-based message combining.
+ */
+export const getPendingByUserModule = query({
+  args: {
+    user: v.id("users"),
+    module: v.id("modules"),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+
+    const items = await ctx.db
+      .query("notificationQueue")
+      .withIndex("by_user_module_status", (q) =>
+        q.eq("user", args.user).eq("module", args.module).eq("status", "pending")
+      )
+      .collect();
+
+    return items.filter((item) => item.scheduled_for <= now);
   },
 });
 
@@ -461,5 +494,68 @@ export const getUserQueuedNotifications = query({
       .query("notificationQueue")
       .withIndex("by_user", (q) => q.eq("user", args.user))
       .collect();
+  },
+});
+
+/**
+ * Count recently sent notifications for rate limiting.
+ * Returns counts by priority and by module within a time window.
+ */
+export const getRecentSentCounts = query({
+  args: {
+    user: v.id("users"),
+    since: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const allItems = await ctx.db
+      .query("notificationQueue")
+      .withIndex("by_user", (q) => q.eq("user", args.user))
+      .collect();
+
+    const recentSent = allItems.filter(
+      (item) => item.status === "sent" && item.scheduled_for >= args.since
+    );
+
+    const byPriority: Record<string, number> = { low: 0, medium: 0, high: 0 };
+    const byModule: Record<string, number> = {};
+
+    for (const item of recentSent) {
+      byPriority[item.priority] = (byPriority[item.priority] ?? 0) + 1;
+      const moduleId = item.module as string;
+      byModule[moduleId] = (byModule[moduleId] ?? 0) + 1;
+    }
+
+    return { byPriority, byModule };
+  },
+});
+
+/**
+ * Get distinct (user, module) pairs from pending-and-due notifications.
+ * Used by the queue processor to batch notifications for synthesis.
+ */
+export const getPendingUserModulePairs = query({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+
+    const pending = await ctx.db
+      .query("notificationQueue")
+      .withIndex("by_status_scheduled", (q) =>
+        q.eq("status", "pending").lte("scheduled_for", now)
+      )
+      .collect();
+
+    const seen = new Set<string>();
+    const pairs: Array<{ user: string; module: string }> = [];
+
+    for (const item of pending) {
+      const key = `${item.user}|${item.module}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        pairs.push({ user: item.user as string, module: item.module as string });
+      }
+    }
+
+    return pairs;
   },
 });

@@ -574,9 +574,22 @@ class DeFiAnalystModule(BaseModule):
     def get_notification_types(self) -> list[NotificationTypeConfig]:
         return [
             NotificationTypeConfig(
-                name="price_alert",
-                description="Price change alerts for watched assets",
+                name="price_change_24h",
+                description="24-hour price change exceeds threshold",
                 default_enabled=True,
+                priority="medium",
+            ),
+            NotificationTypeConfig(
+                name="price_change_7d",
+                description="7-day price change exceeds threshold",
+                default_enabled=True,
+                priority="medium",
+            ),
+            NotificationTypeConfig(
+                name="price_threshold",
+                description="Asset crosses a specific price target",
+                default_enabled=True,
+                priority="high",
             ),
         ]
 
@@ -612,6 +625,45 @@ class DeFiAnalystModule(BaseModule):
             error_msg = f"DeFi Analyst error: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
+
+    async def register_notifications(self, user_id: str, asset_id: str) -> None:
+        """
+        Create default price alert rows (percentage_24h and percentage_7d) for a user+asset.
+        Called when an asset is added to the watchlist. No-op if alerts already exist.
+        """
+        if not self._convex_client:
+            logger.error("DeFiAnalystModule not registered, cannot register notifications")
+            return
+
+        type_24h = self.get_notification_type_id("price_change_24h")
+        type_7d = self.get_notification_type_id("price_change_7d")
+
+        if not type_24h or not type_7d:
+            logger.error("Missing notification type IDs for price_change_24h/7d, cannot register alerts")
+            return
+
+        created = self._convex_client.mutation("priceAlerts:registerDefaultAlerts", {
+            "user": user_id,
+            "asset": asset_id,
+            "notification_type_24h": type_24h,
+            "notification_type_7d": type_7d,
+        })
+        logger.info(f"Registered {created} default price alerts for user={user_id}, asset={asset_id}")
+
+    async def deregister_notifications(self, user_id: str, asset_id: str) -> None:
+        """
+        Clean up all price alerts for a user+asset.
+        Called by the interest expiration job when an inferred watch expires.
+        """
+        if not self._convex_client:
+            logger.error("DeFiAnalystModule not registered, cannot deregister notifications")
+            return
+
+        removed = self._convex_client.mutation("priceAlerts:removeAlertsByUserAsset", {
+            "user": user_id,
+            "asset": asset_id,
+        })
+        logger.info(f"Deregistered {removed} price alerts for user={user_id}, asset={asset_id}")
 
     async def close(self):
         """Clean up resources."""
