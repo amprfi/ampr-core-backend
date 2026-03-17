@@ -90,7 +90,7 @@ async def user_investment_preferences(ctx: RunContext[TalkerContext]) -> List[st
 async def get_help_overview(ctx: RunContext[TalkerContext]) -> str:
     """
     Get an overview of Ampersand's capabilities and all available modules.
-    Call this when the user asks for help, says "$help", asks "what can you do",
+    Call this when the user asks for help, says "&help", asks "what can you do",
     or wants to know what features are available.
     """
     logger.info("Tool called: get_help_overview")

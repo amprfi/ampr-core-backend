@@ -108,11 +108,11 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             _infer_watchlist(context.convex_client, context.user_id, context.message_content)
         )
 
-        # Normalize $help prefix to a natural language help request
+        # Normalize &help prefix to a natural language help request
         stripped = context.message_content.strip()
-        if stripped.lower() == "$help" or stripped.lower().startswith("$help "):
+        if stripped.lower() == "&help" or stripped.lower().startswith("&help "):
             context.message_content = "I need help. What can you do?"
-            logger.info("Detected $help prefix, rewritten to natural language help request")
+            logger.info("Detected &help prefix, rewritten to natural language help request")
 
         # Check for module triggers
         module_registry = get_module_registry()

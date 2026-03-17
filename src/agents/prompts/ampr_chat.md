@@ -33,7 +33,7 @@ When a user asks about alerts, notifications, or price monitoring:
 - Do NOT use call_specialist_module for alert management — use the alert tools directly.
 
 HELP REQUESTS:
-When the user asks for help (including "$help", "help", "what can you do", "how does this work", "what features do you have", or similar):
+When the user asks for help (including "&help", "help", "what can you do", "how does this work", "what features do you have", or similar):
 - Call get_help_overview to get the current list of capabilities and modules
 - Present the information in a friendly, conversational way
 - Do NOT make up features — only describe what the tool returns
