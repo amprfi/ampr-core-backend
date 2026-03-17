@@ -17,9 +17,11 @@ from .api import countries
 from .api import watchlist
 from .api import assets
 from .api import lenses
+from .api import oracle
 from .clients.convex_client import get_client
 from .notifications.queue_processor import get_queue_processor
 from .modules.defianalyst.price_poller import get_price_poller
+from .modules.oracle.event_poller import get_event_poller
 from .modules.registry import get_module_registry
 from .agents.interest_expiration import get_interest_expiration_job
 
@@ -48,10 +50,12 @@ async def lifespan(app: FastAPI):
 
     queue_processor = get_queue_processor(convex_client)
     price_poller = get_price_poller(convex_client)
+    event_poller = get_event_poller(convex_client)
     expiration_job = get_interest_expiration_job(convex_client)
 
     queue_task = asyncio.create_task(queue_processor.run())
     poller_task = asyncio.create_task(price_poller.run())
+    event_poller_task = asyncio.create_task(event_poller.run())
     expiration_task = asyncio.create_task(expiration_job.run())
 
     logger.info("Background services started")
@@ -61,13 +65,16 @@ async def lifespan(app: FastAPI):
     # Shutdown
     queue_processor.stop()
     price_poller.stop()
+    event_poller.stop()
     expiration_job.stop()
 
     queue_task.cancel()
     poller_task.cancel()
+    event_poller_task.cancel()
     expiration_task.cancel()
 
     await price_poller.close()
+    await event_poller.close()
 
     logger.info("Background services stopped")
 
@@ -96,6 +103,8 @@ fast_api.include_router(watchlist.router, prefix="/api")
 fast_api.include_router(assets.router, prefix="/api")
 
 fast_api.include_router(lenses.router, prefix="/api")
+
+fast_api.include_router(oracle.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():

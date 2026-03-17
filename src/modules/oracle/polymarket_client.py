@@ -298,6 +298,57 @@ class PolymarketClient:
             logger.error(f"Error searching Polymarket: {str(e)}")
             raise
     
+    async def get_events_by_tags(
+        self,
+        tag_slugs: List[str],
+        page_size: int = 50,
+        active: Optional[bool] = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch events across multiple tag slugs, paginating and deduplicating.
+
+        Args:
+            tag_slugs: List of Polymarket tag slugs to query
+            page_size: Results per page (default: 50)
+            active: Filter by active status (default: True for active only)
+
+        Returns:
+            Deduplicated list of event dictionaries
+        """
+        seen_ids: set = set()
+        results: List[Dict[str, Any]] = []
+
+        for tag_slug in tag_slugs:
+            offset = 0
+            try:
+                while True:
+                    events = await self.get_events(
+                        tag_slug=tag_slug,
+                        limit=page_size,
+                        offset=offset,
+                        active=active,
+                    )
+                    for event in events:
+                        event_id = event.get("id")
+                        if event_id and event_id not in seen_ids:
+                            seen_ids.add(event_id)
+                            results.append(event)
+
+                    if len(events) < page_size:
+                        break
+                    offset += page_size
+            except Exception as e:
+                logger.warning(
+                    f"Failed to fetch events for tag '{tag_slug}' "
+                    f"(offset={offset}): {e}"
+                )
+                continue
+
+        logger.info(
+            f"Fetched {len(results)} unique events across {len(tag_slugs)} tags"
+        )
+        return results
+
     async def get_trending_events(
         self,
         limit: int = 10,

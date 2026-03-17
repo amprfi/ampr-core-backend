@@ -1,0 +1,80 @@
+# Oracle module configuration
+# Tags used to discover prediction events from Polymarket
+
+tags:
+  # Crypto
+  - bitcoin
+  - crypto
+  - crypto-prices
+  - ethereum
+  - solana
+  - public-sale
+  - token-sales
+  - fdv
+
+  # Markets
+  - ath
+  - hit-price
+  - up-or-down
+  - multi-strikes
+  - pre-market
+  - ipos
+  - finance
+  - daily-close
+
+  # Equities
+  - indicies
+  - indices
+  - spx
+  - business
+  - acquisitions
+  - ftse
+  - dji
+  - sp-500
+  - earnings
+  - equities
+  - nya
+  - dax
+  - kospi-composite-index
+  - nik
+  - hsi
+  - rut
+
+  # Forex
+  - fx
+  - exchange-rate
+  - forex
+  - foreign-exchange
+  - dollar
+  - euro
+  - yen
+  - pound
+  - won
+
+  # Commodities
+  - silver
+  - gold
+  - commodities
+  - futures
+  - comex
+  - oil
+
+  # Macro
+  - economy
+  - fed
+  - fed-rates
+  - economic-policy
+  - gdp
+  - geopolitics
+  - politics
+  - foreign-policy
+  - housing
+  - treasuries
+  - ecb
+  - global-rates
+  - european-central-bank
+  - trade-war
+  - tariffs
+  - macro-indicators
+  - inflation
+  - unemployment
