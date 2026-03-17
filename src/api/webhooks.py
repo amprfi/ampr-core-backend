@@ -601,6 +601,7 @@ async def handle_telegram_webhook(request: Request):
             detail="Invalid secret token"
         )
     
+    telegram_id = None
     try:
         # Parse update
         data = await request.json()
@@ -723,10 +724,20 @@ async def handle_telegram_webhook(request: Request):
         
     except Exception as e:
         logger.error(f"Error processing Telegram webhook: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing update: {str(e)}"
-        )
+        # Always return 200 to Telegram to prevent retry storms.
+        # Send a friendly error message to the user instead.
+        try:
+            if telegram_id:
+                from ..clients.telegram_client import TelegramClient
+                telegram_client = TelegramClient()
+                await telegram_client.send_message(
+                    chat_id=int(telegram_id),
+                    text="⚠️ Something went wrong processing your message. Please try again in a moment."
+                )
+                await telegram_client.close()
+        except Exception as notify_err:
+            logger.error(f"Failed to send error notification to user: {notify_err}")
+        return {"status": "ok"}
 
 
 async def _handle_contact_sharing(convex_client, contact: Contact, telegram_id: str):
