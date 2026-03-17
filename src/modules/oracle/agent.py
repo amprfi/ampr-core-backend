@@ -26,50 +26,58 @@ agent = Agent(
 
 
 @agent.tool
-async def get_tracked_events(
-    ctx: RunContext[OracleContext]
+async def search_events(
+    ctx: RunContext[OracleContext],
+    query: str
 ) -> str:
     """
-    Get the list of prediction events that are currently being tracked.
-    Use this to discover available events and their slugs before querying specific event data.
+    Search for prediction events by keyword query.
+    Returns up to 10 matching active events with their slugs.
+    Use this to find relevant events before fetching detailed market data with get_event.
+
+    Args:
+        query: Search terms (e.g., "bitcoin", "ECB interest rates", "gold price")
 
     Returns:
-        Formatted list of tracked events with slugs, titles, and descriptions
+        Formatted list of matching events with slugs, titles, and descriptions
     """
-    logger.info("Tool called: get_tracked_events")
+    logger.info(f"Tool called: search_events with query='{query}'")
 
     try:
-        events = ctx.deps.convex_client.query("predictionEvents:getActiveEvents")
+        events = ctx.deps.convex_client.query(
+            "predictionEvents:searchEvents",
+            {"query": query, "limit": 10}
+        )
 
         if not events:
-            return "No prediction events are currently being tracked."
+            return f"No active prediction events found matching '{query}'."
 
-        lines = [f"Tracked Prediction Events ({len(events)}):"]
+        lines = [f"Search Results for '{query}' ({len(events)} found):"]
 
         for i, event in enumerate(events, 1):
             title = event.get("title", "Unknown")
             slug = event.get("slug", "")
             description = event.get("description", "")
-            tags = event.get("tags", [])
             end_date = event.get("endDate", "")
+            tags = event.get("tags", [])
 
             lines.append(f"{i}. {title}")
             lines.append(f"   Slug: {slug}")
+            if end_date:
+                lines.append(f"   End Date: {end_date[:10]}")
             if description:
                 lines.append(f"   Description: {description[:150]}{'...' if len(description) > 150 else ''}")
             if tags:
                 lines.append(f"   Tags: {', '.join(tags)}")
-            if end_date:
-                lines.append(f"   End Date: {end_date}")
             lines.append("")
 
         result = "\n".join(lines)
-        logger.info(f"Tool result: Found {len(events)} tracked events")
+        logger.info(f"Tool result: Found {len(events)} events for query '{query}'")
         return result
 
     except Exception as e:
-        error_msg = f"Failed to retrieve tracked events: {str(e)}"
-        logger.error(f"Tool error: get_tracked_events - {error_msg}")
+        error_msg = f"Failed to search events: {str(e)}"
+        logger.error(f"Tool error: search_events - {error_msg}")
         return error_msg
 
 
@@ -80,13 +88,13 @@ async def get_event(
 ) -> str:
     """
     Get prediction market data for an event by its slug.
-    Use get_tracked_events first to see available slugs.
+    Use search_events first to find relevant events and their slugs.
 
     Args:
         slug: The event slug (e.g., "will-bitcoin-hit-100k-in-2025")
 
     Returns:
-        Formatted string with event details and constituent market probabilities
+        Formatted string with event details, market probabilities, price changes, volume, and open interest
     """
     logger.info(f"Tool called: get_event for slug={slug}")
 
@@ -125,10 +133,13 @@ async def get_event(
             for i, market in enumerate(markets, 1):
                 group_title = market.get("groupItemTitle", "")
                 question = market.get("question", "Unknown")
-                outcomes = market.get("outcomes", ["Yes", "No"])
                 outcome_prices = market.get("outcomePrices", [])
                 market_volume = market.get("volume", 0)
                 market_closed = market.get("closed", False)
+                open_interest = market.get("openInterest", 0)
+                one_day_change = market.get("oneDayPriceChange", None)
+                one_week_change = market.get("oneWeekPriceChange", None)
+                one_month_change = market.get("oneMonthPriceChange", None)
 
                 probability = None
                 if outcome_prices and len(outcome_prices) >= 1:
@@ -138,6 +149,7 @@ async def get_event(
                         probability = None
 
                 market_volume_str = f"${float(market_volume):,.0f}" if market_volume else "N/A"
+                open_interest_str = f"${float(open_interest):,.0f}" if open_interest else "N/A"
                 status = " [Resolved]" if market_closed else ""
 
                 display_name = group_title if group_title else question
@@ -146,7 +158,27 @@ async def get_event(
                     lines.append(f"{i}. {display_name}: {probability:.1f}% probability{status}")
                 else:
                     lines.append(f"{i}. {display_name}: N/A{status}")
-                lines.append(f"   Volume: {market_volume_str}")
+                lines.append(f"   Volume: {market_volume_str} | Open Interest: {open_interest_str}")
+
+                # Price changes
+                changes = []
+                if one_day_change is not None:
+                    try:
+                        changes.append(f"1D: {float(one_day_change):+.1%}")
+                    except (ValueError, TypeError):
+                        pass
+                if one_week_change is not None:
+                    try:
+                        changes.append(f"1W: {float(one_week_change):+.1%}")
+                    except (ValueError, TypeError):
+                        pass
+                if one_month_change is not None:
+                    try:
+                        changes.append(f"1M: {float(one_month_change):+.1%}")
+                    except (ValueError, TypeError):
+                        pass
+                if changes:
+                    lines.append(f"   Price Change: {' | '.join(changes)}")
         else:
             lines.append("No markets found for this event.")
 

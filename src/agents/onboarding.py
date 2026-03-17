@@ -88,6 +88,47 @@ async def update_user_info(
         return error_msg
 
 @agent.tool
+async def set_user_country(
+    ctx: RunContext[OnboardingContext],
+    country_name: str
+) -> str:
+    """
+    Set the user's country on their profile.
+    Accepts a country name (e.g., "United States", "Germany") or ISO 3166-1 alpha-3 code (e.g., "USA", "DEU").
+    Looks up the country in the database and updates the user's profile.
+    """
+    logger.info(f"Tool called: set_user_country for user_id={ctx.deps.user_id}, country_name={country_name}")
+    try:
+        # Try looking up by code first (uppercase)
+        country = ctx.deps.convex_client.query("countries:getCountryByCode", {
+            "country_code": country_name.upper()
+        })
+
+        if not country:
+            # Search all countries by name (case-insensitive partial match)
+            all_countries = ctx.deps.convex_client.query("countries:getCountries", {})
+            for c in all_countries:
+                if country_name.lower() in c["country_name"].lower():
+                    country = c
+                    break
+
+        if not country:
+            return f"Could not find country '{country_name}'. Please try again with the full country name or 3-letter code."
+
+        # Upsert the profile with the country
+        ctx.deps.convex_client.mutation("profiles:updateProfile", {
+            "user": ctx.deps.user_id,
+            "country": country["_id"]
+        })
+
+        logger.info(f"Tool result: set_user_country set country to {country['country_name']} ({country['country_code']})")
+        return f"Country set to {country['country_name']}"
+    except Exception as e:
+        error_msg = f"Error setting country: {str(e)}"
+        logger.error(f"Tool error: set_user_country - {error_msg}")
+        return error_msg
+
+@agent.tool
 async def complete_onboarding(ctx: RunContext[OnboardingContext]) -> str:
     """
     Mark the user's onboarding as complete.
