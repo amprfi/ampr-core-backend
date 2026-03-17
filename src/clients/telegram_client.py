@@ -3,6 +3,7 @@ Telegram client module for sending messages via Telegram Bot API.
 
 Provides a simple async client for sending text messages using aiogram.
 """
+import re
 import logging
 from typing import Optional, List, Dict, Any
 from aiogram import Bot
@@ -11,6 +12,11 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from src.config.telegram_config import get_telegram_bot
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_headers_to_bold(text: str) -> str:
+    """Convert markdown headers (e.g. # Title) to bold text (*Title*) for Telegram compatibility."""
+    return re.sub(r"^#{1,6}\s+(.+)$", r"*\1*", text, flags=re.MULTILINE)
 
 
 class TelegramClient:
@@ -42,6 +48,7 @@ class TelegramClient:
             Dictionary containing the response data or None if failed
         """
         try:
+            text = _convert_headers_to_bold(text)
             message = await self.bot.send_message(
                 chat_id=chat_id,
                 text=text,

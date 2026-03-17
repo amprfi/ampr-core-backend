@@ -239,40 +239,52 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         {context.message_content}{date_context_section}
         {module_not_found_section}"""
 
-        # Get the agent response with enhanced context
+        # Get the agent response with enhanced context (retry on transient LLM errors)
+        max_retries = 3
         talker_context = None  # Track for module attribution
-        if needs_onboarding:
-            logger.info(f"User {context.user_id} needs onboarding, using onboarding agent")
-            onboarding_agent = get_onboarding_agent()
-            onboarding_context = OnboardingContext(
-                convex_client=context.convex_client,
-                user_id=context.user_id,
-                telegram_id=context.telegram_id
-            )
-            result = await onboarding_agent.run(
-                context_str,
-                deps=onboarding_context,
-            )
-        else:
-            amprChat_agent = get_amprChat_agent()
-            talker_context = TalkerContext(
-                convex_client=context.convex_client,
-                user_id=context.user_id,
-                date_context=date_context_str,
-                invoked_modules=[module_name] if module_name else [],
-                module_already_invoked=module_name is not None,
-                channel=context.channel,
-                telegram_id=context.telegram_id,
-            )
-            result = await amprChat_agent.run(
-                context_str,
-                deps=talker_context,
-            )
+        for attempt in range(max_retries):
+            try:
+                if needs_onboarding:
+                    logger.info(f"User {context.user_id} needs onboarding, using onboarding agent")
+                    onboarding_agent = get_onboarding_agent()
+                    onboarding_context = OnboardingContext(
+                        convex_client=context.convex_client,
+                        user_id=context.user_id,
+                        telegram_id=context.telegram_id
+                    )
+                    result = await onboarding_agent.run(
+                        context_str,
+                        deps=onboarding_context,
+                    )
+                else:
+                    amprChat_agent = get_amprChat_agent()
+                    talker_context = TalkerContext(
+                        convex_client=context.convex_client,
+                        user_id=context.user_id,
+                        date_context=date_context_str,
+                        invoked_modules=[module_name] if module_name else [],
+                        module_already_invoked=module_name is not None,
+                        channel=context.channel,
+                        telegram_id=context.telegram_id,
+                    )
+                    result = await amprChat_agent.run(
+                        context_str,
+                        deps=talker_context,
+                    )
+                break  # Success, exit retry loop
+            except Exception as agent_err:
+                err_str = str(agent_err).lower()
+                is_transient = "503" in err_str or "overloaded" in err_str or "rate" in err_str
+                if is_transient and attempt < max_retries - 1:
+                    wait = 2 ** (attempt + 1)  # 2s, 4s
+                    logger.warning(f"Transient LLM error (attempt {attempt + 1}/{max_retries}), retrying in {wait}s: {agent_err}")
+                    await asyncio.sleep(wait)
+                else:
+                    raise
 
         # Extract the output from the AgentRunResult
-        # Agents can return either a single string or a list of strings
-        agent_output: str | list[str] = result.output
-        response_messages = interim_messages + (agent_output if isinstance(agent_output, list) else [agent_output])
+        agent_output: str = result.output
+        response_messages = interim_messages + [agent_output]
 
         logger.info(f"Generated AI response: {response_messages}")
 
@@ -300,20 +312,25 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
             context.convex_client.mutation("messages:createMessage", message_data)
 
-            # For Telegram responses, send the message via Telegram Bot API
+            # For Telegram responses, split on paragraph breaks and send each as a separate message
             if context.channel == "telegram" and context.telegram_id:
                 from ..clients.telegram_client import TelegramClient
                 telegram_client = TelegramClient()
-                telegram_result = await telegram_client.send_message(
-                    chat_id=int(context.telegram_id),
-                    text=response_content
-                )
+                
+                # Split on double newlines to keep bullet lists and paragraphs intact
+                telegram_chunks = [chunk.strip() for chunk in response_content.split("\n\n") if chunk.strip()]
+                
+                for chunk in telegram_chunks:
+                    telegram_result = await telegram_client.send_message(
+                        chat_id=int(context.telegram_id),
+                        text=chunk
+                    )
+                    if telegram_result:
+                        logger.info(f"Successfully sent Telegram chunk to {context.telegram_id}")
+                    else:
+                        logger.error(f"Failed to send Telegram chunk to {context.telegram_id}")
+                
                 await telegram_client.close()
-
-                if telegram_result:
-                    logger.info(f"Successfully sent Telegram response to {context.telegram_id}")
-                else:
-                    logger.error(f"Failed to send Telegram response to {context.telegram_id}")
 
         logger.info(f"Stored AI response in database for chat {context.chat_id}")
 
