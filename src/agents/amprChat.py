@@ -25,7 +25,7 @@ class TalkerContext(BaseModel):
 agent = Agent(
     "mistral:mistral-large-latest",
     deps_type=TalkerContext,
-    output_type=List[str]
+    output_type=str
 )
 
 @agent.tool

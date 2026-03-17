@@ -270,9 +270,8 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             )
 
         # Extract the output from the AgentRunResult
-        # Agents can return either a single string or a list of strings
-        agent_output: str | list[str] = result.output
-        response_messages = interim_messages + (agent_output if isinstance(agent_output, list) else [agent_output])
+        agent_output: str = result.output
+        response_messages = interim_messages + [agent_output]
 
         logger.info(f"Generated AI response: {response_messages}")
 
@@ -300,20 +299,25 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
             context.convex_client.mutation("messages:createMessage", message_data)
 
-            # For Telegram responses, send the message via Telegram Bot API
+            # For Telegram responses, split on paragraph breaks and send each as a separate message
             if context.channel == "telegram" and context.telegram_id:
                 from ..clients.telegram_client import TelegramClient
                 telegram_client = TelegramClient()
-                telegram_result = await telegram_client.send_message(
-                    chat_id=int(context.telegram_id),
-                    text=response_content
-                )
+                
+                # Split on double newlines to keep bullet lists and paragraphs intact
+                telegram_chunks = [chunk.strip() for chunk in response_content.split("\n\n") if chunk.strip()]
+                
+                for chunk in telegram_chunks:
+                    telegram_result = await telegram_client.send_message(
+                        chat_id=int(context.telegram_id),
+                        text=chunk
+                    )
+                    if telegram_result:
+                        logger.info(f"Successfully sent Telegram chunk to {context.telegram_id}")
+                    else:
+                        logger.error(f"Failed to send Telegram chunk to {context.telegram_id}")
+                
                 await telegram_client.close()
-
-                if telegram_result:
-                    logger.info(f"Successfully sent Telegram response to {context.telegram_id}")
-                else:
-                    logger.error(f"Failed to send Telegram response to {context.telegram_id}")
 
         logger.info(f"Stored AI response in database for chat {context.chat_id}")
 

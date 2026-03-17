@@ -16,7 +16,7 @@ class OnboardingContext(BaseModel):
 agent = Agent(
     "mistral:mistral-large-latest",
     deps_type=OnboardingContext,
-    output_type=List[str]
+    output_type=str
 )
 
 @agent.tool
