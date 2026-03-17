@@ -12,10 +12,31 @@ class ExtractorContext(BaseModel):
     convex_client: ConvexClient
     user_id: str
 
+HORIZON_MAP = {
+    "E_1_5": "1-5",
+    "E_6_10": "6-10",
+    "E_10_20": "10-20",
+    "E_20PLUS": "20 plus",
+    # Pass through if already correct
+    "1-5": "1-5",
+    "6-10": "6-10",
+    "10-20": "10-20",
+    "20 plus": "20 plus",
+}
+
+KNOWLEDGE_MAP = {
+    "NOVICE": "novice",
+    "INTERMEDIATE": "intermediate",
+    "ADVANCED": "advanced",
+    "novice": "novice",
+    "intermediate": "intermediate",
+    "advanced": "advanced",
+}
+
 class ExtractedProfile(BaseModel):
     inferred_investment_horizon: Optional[str] = Field(
         None,
-        description="Investment timeframe: E_1_5 (short-term), E_6_10 (medium-term), E_10_20 (long-term), or E_20PLUS (very long-term)"
+        description="Investment timeframe: 1-5 (short-term), 6-10 (medium-term), 10-20 (long-term), or 20 plus (very long-term)"
     )
     inferred_risk_appetite: Optional[int] = Field(
         None,
@@ -25,7 +46,7 @@ class ExtractedProfile(BaseModel):
     )
     inferred_investment_knowledge: Optional[str] = Field(
         None,
-        description="Investment expertise: NOVICE, INTERMEDIATE, or ADVANCED"
+        description="Investment expertise: novice, intermediate, or advanced"
     )
     inferred_financial_goals: Optional[List[str]] = Field(
         None,

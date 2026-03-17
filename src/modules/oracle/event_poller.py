@@ -13,6 +13,7 @@ Two-pass approach:
 """
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -319,7 +320,13 @@ class EventPoller:
         """
         Run the poller continuously at the configured interval.
         Call stop() to terminate.
+
+        Set DISABLE_EVENT_POLLER=true to skip polling entirely.
         """
+        if os.getenv("DISABLE_EVENT_POLLER", "").lower() in ("true", "1", "yes"):
+            logger.info("Oracle event poller disabled via DISABLE_EVENT_POLLER")
+            return
+
         self._running = True
         logger.info(
             f"Starting oracle event poller (interval: {POLL_INTERVAL_SECONDS}s)"

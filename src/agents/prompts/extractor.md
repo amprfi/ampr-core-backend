@@ -11,8 +11,8 @@ FIELD DEFINITIONS:
 
 **inferred_investment_horizon**
 - Evidence: User mentions timeframes ("saving for retirement in 30 years", "need money in 2 years", "long-term growth")
-- Values: E_1_5 (short-term), E_6_10 (medium-term), E_10_20 (long-term), E_20PLUS (very long-term)
-- Example: "I'm 25 and thinking about retirement" → E_20PLUS
+- Values: 1-5 (short-term), 6-10 (medium-term), 10-20 (long-term), 20 plus (very long-term)
+- Example: "I'm 25 and thinking about retirement" → 20 plus
 
 **inferred_risk_appetite** (1-5 scale)
 - 1: Very conservative (mentions safety, capital preservation, can't afford losses)
@@ -23,10 +23,10 @@ FIELD DEFINITIONS:
 - Example: "I can handle some volatility for better returns" → 3 or 4
 
 **inferred_investment_knowledge**
-- NOVICE: Basic questions, unfamiliar with investment concepts, asks for explanations
-- INTERMEDIATE: Understands basic concepts, asks about specific strategies, familiar with common assets
-- ADVANCED: Discusses complex strategies, derivatives, portfolio optimization, risk management
-- Example: "What's the difference between stocks and bonds?" → NOVICE
+- novice: Basic questions, unfamiliar with investment concepts, asks for explanations
+- intermediate: Understands basic concepts, asks about specific strategies, familiar with common assets
+- advanced: Discusses complex strategies, derivatives, portfolio optimization, risk management
+- Example: "What's the difference between stocks and bonds?" → novice
 
 **inferred_financial_goals**
 - Extract specific goals mentioned: "retirement", "buying a home", "children's education", "wealth building", "passive income", etc.

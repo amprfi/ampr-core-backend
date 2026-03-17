@@ -87,6 +87,79 @@ async def user_investment_preferences(ctx: RunContext[TalkerContext]) -> List[st
         return [error_msg]
 
 @agent.tool
+async def get_help_overview(ctx: RunContext[TalkerContext]) -> str:
+    """
+    Get an overview of Ampersand's capabilities and all available modules.
+    Call this when the user asks for help, says "$help", asks "what can you do",
+    or wants to know what features are available.
+    """
+    logger.info("Tool called: get_help_overview")
+    registry = get_module_registry()
+    modules = registry.list_modules()
+
+    lines = [
+        "Ampersand is your financial co-pilot. Here's what I can help you with:",
+        "",
+        "General capabilities:",
+        "- Answer financial questions and provide market insights",
+        "- Manage your watchlist and track assets you're interested in",
+        "- Set up price alerts and notifications",
+        "- Provide personalized guidance based on your preferences",
+        "",
+        "Available specialist modules:",
+    ]
+
+    for mod in modules:
+        trigger = mod.get("trigger", "")
+        description = mod.get("description", "")
+        lines.append(f"- {trigger} — {description}")
+        intents = mod.get("intents", [])
+        if intents:
+            for intent in intents[:3]:
+                lines.append(f"    • {intent}")
+            if len(intents) > 3:
+                lines.append(f"    • ...and {len(intents) - 3} more")
+
+    lines.append("")
+    lines.append("You can invoke a module directly by mentioning its trigger (e.g., &defianalyst what is the price of BTC?) or just ask me naturally and I'll route to the right module.")
+
+    result = "\n".join(lines)
+    logger.info(f"Tool result: get_help_overview returned overview with {len(modules)} modules")
+    return result
+
+@agent.tool
+async def get_user_watchlist(ctx: RunContext[TalkerContext]) -> str:
+    """
+    Get the user's current watchlist showing all assets they are watching.
+    Call this when the user asks about their watchlist, what they're tracking,
+    or what assets they're following.
+    """
+    logger.info(f"Tool called: get_user_watchlist for user_id={ctx.deps.user_id}")
+    try:
+        items = ctx.deps.convex_client.query("portfolioItems:getWatchlist", {
+            "user": ctx.deps.user_id
+        })
+
+        if not items:
+            return "Your watchlist is currently empty. You can ask me about any asset and I'll start tracking it for you, or tell me to add something to your watchlist."
+
+        lines = []
+        for item in items:
+            asset = item.get("asset_details", {})
+            name = asset.get("name", "Unknown")
+            ticker = asset.get("ticker", "")
+            status = item.get("asset_status", "watching")
+            label = f"{name} ({ticker})" if ticker else name
+            status_label = "watching" if status == "stated watch" else "auto-detected"
+            lines.append(f"- {label} [{status_label}]")
+
+        return f"Your watchlist ({len(items)} assets):\n" + "\n".join(lines)
+    except Exception as e:
+        error_msg = f"Error retrieving watchlist: {str(e)}"
+        logger.error(f"Tool error: get_user_watchlist - {error_msg}")
+        return f"ERROR: {error_msg}"
+
+@agent.tool
 async def list_specialist_modules(ctx: RunContext[TalkerContext]) -> List[Dict[str, str]]:
     """
     List all available specialist modules with their names and descriptions.

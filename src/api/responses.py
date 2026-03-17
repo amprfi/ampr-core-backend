@@ -14,7 +14,7 @@ import json
 
 from ..agents.amprChat import get_amprChat_agent, TalkerContext
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
-from ..agents.extractor import get_extractor_agent, ExtractorContext
+from ..agents.extractor import get_extractor_agent, ExtractorContext, HORIZON_MAP, KNOWLEDGE_MAP
 from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..agents.watchlist_inferrer import infer_watchlist
@@ -107,6 +107,12 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         asyncio.create_task(
             _infer_watchlist(context.convex_client, context.user_id, context.message_content)
         )
+
+        # Normalize $help prefix to a natural language help request
+        stripped = context.message_content.strip()
+        if stripped.lower() == "$help" or stripped.lower().startswith("$help "):
+            context.message_content = "I need help. What can you do?"
+            logger.info("Detected $help prefix, rewritten to natural language help request")
 
         # Check for module triggers
         module_registry = get_module_registry()
@@ -464,11 +470,19 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
             if has_updates:
                 update_data = {}
                 if extracted_profile.inferred_investment_horizon is not None:
-                    update_data["inferred_investment_horizon"] = extracted_profile.inferred_investment_horizon
+                    horizon = HORIZON_MAP.get(extracted_profile.inferred_investment_horizon)
+                    if horizon:
+                        update_data["inferred_investment_horizon"] = horizon
+                    else:
+                        logger.warning(f"Unknown investment horizon value: {extracted_profile.inferred_investment_horizon}")
                 if extracted_profile.inferred_risk_appetite is not None:
                     update_data["inferred_risk_appetite"] = extracted_profile.inferred_risk_appetite
                 if extracted_profile.inferred_investment_knowledge is not None:
-                    update_data["inferred_investment_knowledge"] = extracted_profile.inferred_investment_knowledge.lower()
+                    knowledge = KNOWLEDGE_MAP.get(extracted_profile.inferred_investment_knowledge)
+                    if knowledge:
+                        update_data["inferred_investment_knowledge"] = knowledge
+                    else:
+                        logger.warning(f"Unknown investment knowledge value: {extracted_profile.inferred_investment_knowledge}")
                 if extracted_profile.inferred_financial_goals is not None:
                     update_data["inferred_financial_goals"] = extracted_profile.inferred_financial_goals
                 if extracted_profile.inferred_investment_thesis is not None:
