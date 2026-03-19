@@ -8,7 +8,7 @@ the storage and delivery of those responses across different channels (SMS, chat
 import asyncio
 import logging
 import re
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 from convex import ConvexClient
 import json
 
@@ -20,6 +20,7 @@ from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..agents.watchlist_inferrer import infer_watchlist
 from ..modules.registry import get_module_registry
 from ..utils.formatting import strip_markdown
+from ..clients.async_convex_client import AsyncConvexClient, get_async_client
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -33,7 +34,8 @@ class ResponseContext:
         chat_id: The ID of the chat (optional, will be auto-created if None)
         channel: The channel (sms, chat, telegram)
         user_id: The ID of the user
-        convex_client: Convex client
+        convex_client: Sync Convex client (legacy, used by agents that still need it)
+        async_convex_client: Async Convex client for non-blocking DB calls
         phone_number: Optional phone number for SMS responses
         telegram_id: Optional Telegram chat ID for Telegram responses
     """
@@ -52,6 +54,7 @@ class ResponseContext:
         self.channel = channel
         self.user_id = user_id
         self.convex_client = convex_client
+        self.async_convex_client = get_async_client()
         self.phone_number = phone_number
         self.telegram_id = telegram_id
 
@@ -94,7 +97,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             "content": context.message_content,
         }
 
-        created_message = context.convex_client.mutation("messages:createMessage", message_args)
+        created_message = await context.async_convex_client.mutation("messages:createMessage", message_args)
 
         # Get chat_id from created message if not provided (auto-created by createMessage)
         if not context.chat_id:
@@ -151,15 +154,15 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             await _send_interim_message(context, text=not_found_text)
             interim_messages.append(not_found_text)
 
-        # Check if user needs onboarding
-        user = context.convex_client.query("users:getUser", {"userId": context.user_id})
+        # Fetch user and chat data in parallel (non-blocking)
+        user, chat_data = await asyncio.gather(
+            context.async_convex_client.query("users:getUser", {"userId": context.user_id}),
+            context.async_convex_client.query("chats:getChat", {
+                "userId": context.user_id,
+                "chatId": context.chat_id
+            }),
+        )
         needs_onboarding = user and not user.get("onboarding_complete")
-
-        # Fetch chat data including messages and summaries
-        chat_data = context.convex_client.query("chats:getChat", {
-            "userId": context.user_id,
-            "chatId": context.chat_id
-        })
 
         # Process Summaries (Oldest to Newest)
         summaries_list = []
@@ -310,7 +313,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             if specialist_module:
                 message_data["specialist_module"] = specialist_module
 
-            context.convex_client.mutation("messages:createMessage", message_data)
+            await context.async_convex_client.mutation("messages:createMessage", message_data)
 
             # For Telegram responses, split on paragraph breaks and send each as a separate message
             if context.channel == "telegram" and context.telegram_id:
@@ -334,9 +337,11 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         logger.info(f"Stored AI response in database for chat {context.chat_id}")
 
-        # --- MEMORY MANAGEMENT ---
-        # Trigger the background memory management process
-        await _manage_chat_memory(context.convex_client, context.chat_id, context.user_id)
+        # --- MEMORY MANAGEMENT (fire-and-forget) ---
+        # Run in background so the user gets their response immediately
+        asyncio.create_task(
+            _manage_chat_memory(context.async_convex_client, context.chat_id, context.user_id)
+        )
 
         return response_messages
 
@@ -394,9 +399,9 @@ async def _infer_watchlist(convex_client: ConvexClient, user_id: str, message: s
         logger.error(f"Watchlist inference failed for user {user_id}: {str(e)}", exc_info=True)
 
 
-async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id: str):
+async def _manage_chat_memory(async_client: AsyncConvexClient, chat_id: str, user_id: str):
     """
-    Manages the chat memory lifecycle:
+    Manages the chat memory lifecycle (runs as fire-and-forget background task):
     1. Updates message statuses (Current -> PendingSummary)
     2. Checks if enough PendingSummary messages exist to trigger summarization
     3. Runs summarizer agent if needed
@@ -405,7 +410,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
     """
     try:
         # Step 1: Update message statuses and get pending count
-        pending_count = convex_client.mutation("messages:updateMessageStatus", {
+        pending_count = await async_client.mutation("messages:updateMessageStatus", {
             "chatId": chat_id
         })
 
@@ -416,7 +421,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
             logger.info(f"Triggering summarization for chat {chat_id}")
 
             # Fetch the messages to summarize
-            messages_to_summarize = convex_client.query("messages:getMessagesToSummarize", {
+            messages_to_summarize = await async_client.query("messages:getMessagesToSummarize", {
                 "chatId": chat_id
             })
 
@@ -448,29 +453,29 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
 
             conversation_text = "\n".join(text_lines)
 
-            # Run Summarizer Agent
+            # Run Summarizer and Extractor agents in parallel
             summarizer_agent = get_summarizer_agent()
             summarizer_ctx = SummarizerContext()
 
-            summary_result = await summarizer_agent.run(
-                f"Please summarize these messages:\n\n{conversation_text}",
-                deps=summarizer_ctx
+            extractor_agent = get_extractor_agent()
+            extractor_ctx = ExtractorContext(
+                convex_client=get_async_client(),
+                user_id=user_id
+            )
+
+            summary_result, extraction_result = await asyncio.gather(
+                summarizer_agent.run(
+                    f"Please summarize these messages:\n\n{conversation_text}",
+                    deps=summarizer_ctx
+                ),
+                extractor_agent.run(
+                    f"Extract user profile information from these messages:\n\n{conversation_text}",
+                    deps=extractor_ctx
+                ),
             )
 
             summary_content = summary_result.output
             logger.info(f"Generated summary for chat {chat_id}: {summary_content[:50]}...")
-
-            # Run Extractor Agent
-            extractor_agent = get_extractor_agent()
-            extractor_ctx = ExtractorContext(
-                convex_client=convex_client,
-                user_id=user_id
-            )
-
-            extraction_result = await extractor_agent.run(
-                f"Extract user profile information from these messages:\n\n{conversation_text}",
-                deps=extractor_ctx
-            )
 
             extracted_profile = extraction_result.output
             logger.info(f"Extracted profile data for user {user_id}")
@@ -505,7 +510,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
                 if extracted_profile.inferred_investment_thesis is not None:
                     update_data["inferred_investment_thesis"] = extracted_profile.inferred_investment_thesis
 
-                convex_client.mutation("profiles:updateProfile", {
+                await async_client.mutation("profiles:updateProfile", {
                     "user": user_id,
                     **update_data
                 })
@@ -514,7 +519,7 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
                 logger.info(f"No profile updates extracted for user {user_id}")
 
             # Save Summary and Archive Messages
-            convex_client.mutation("messages:createSummaryAndArchive", {
+            await async_client.mutation("messages:createSummaryAndArchive", {
                 "chatId": chat_id,
                 "content": summary_content,
                 "range_start": range_start,
@@ -525,5 +530,5 @@ async def _manage_chat_memory(convex_client: ConvexClient, chat_id: str, user_id
             logger.info(f"Successfully archived {len(message_ids)} messages for chat {chat_id}")
 
     except Exception as e:
-        # Log but don't fail the user response if memory management fails
+        # Log but don't fail — this runs as a background task
         logger.error(f"Error in memory management for chat {chat_id}: {str(e)}", exc_info=True)

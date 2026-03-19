@@ -24,7 +24,8 @@ dependencies = [
     "convex (>=0.7.0,<0.8.0)",
     "aiogram (>=3.23.0,<4.0.0)",
     "trafilatura (>=2.0.0,<3.0.0)",
-    "markdownify (>=1.2.2,<2.0.0)"
+    "markdownify (>=1.2.2,<2.0.0)",
+    "mistralai (>=1.9.11,<2.0.0)"
     ]
 
 [build-system]
