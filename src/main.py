@@ -19,6 +19,7 @@ from .api import assets
 from .api import lenses
 from .api import oracle
 from .clients.convex_client import get_client
+from .clients.async_convex_client import get_async_client
 from .notifications.queue_processor import get_queue_processor
 from .modules.defianalyst.price_poller import get_price_poller
 from .modules.oracle.event_poller import get_event_poller
@@ -75,6 +76,10 @@ async def lifespan(app: FastAPI):
 
     await price_poller.close()
     await event_poller.close()
+
+    # Close the async Convex HTTP client connection pool
+    async_client = get_async_client()
+    await async_client.close()
 
     logger.info("Background services stopped")
 

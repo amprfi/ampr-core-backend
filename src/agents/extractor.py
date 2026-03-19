@@ -1,15 +1,17 @@
 from pathlib import Path
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List
+from typing import Optional, List, Union
 from convex import ConvexClient
 import logging
+
+from ..clients.async_convex_client import AsyncConvexClient
 
 logger = logging.getLogger(__name__)
 
 class ExtractorContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    convex_client: ConvexClient
+    convex_client: Union[ConvexClient, AsyncConvexClient]
     user_id: str
 
 HORIZON_MAP = {
@@ -70,9 +72,15 @@ async def get_current_profile(ctx: RunContext[ExtractorContext]) -> str:
     """
     logger.info(f"Tool called: get_current_profile for user_id={ctx.deps.user_id}")
     try:
-        result = ctx.deps.convex_client.query("profiles:getInvestmentPreferences", {
-            "userId": ctx.deps.user_id
-        })
+        client = ctx.deps.convex_client
+        if isinstance(client, AsyncConvexClient):
+            result = await client.query("profiles:getInvestmentPreferences", {
+                "userId": ctx.deps.user_id
+            })
+        else:
+            result = client.query("profiles:getInvestmentPreferences", {
+                "userId": ctx.deps.user_id
+            })
         
         if not result:
             return "No existing profile data found. All fields are empty."
