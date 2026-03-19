@@ -74,22 +74,21 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
     try:
         logger.info(f"Generating AI response for {context.channel} message in chat {context.chat_id}")
 
-        # Conditionally run date preprocessor only if message likely contains date references
-        date_context_str = None
+        # --- PHASE 1: Kick off date preprocessor + store message concurrently ---
+
+        # Start date preprocessor in background (don't await yet)
+        date_task = None
         if has_date_references(context.message_content):
-            logger.info("Date references detected, running date preprocessor")
+            logger.info("Date references detected, starting date preprocessor concurrently")
             date_preprocessor_agent = get_date_preprocessor_agent()
             date_preprocessor_context = DatePreprocessorContext()
-
-            date_preprocessor_result = await date_preprocessor_agent.run(context.message_content, deps=date_preprocessor_context)
-            date_context: DateContext = date_preprocessor_result.output
-            date_context_str = date_context.to_context_string()
-
-            logger.info(f"Date context: {date_context_str}")
+            date_task = asyncio.create_task(
+                date_preprocessor_agent.run(context.message_content, deps=date_preprocessor_context)
+            )
         else:
             logger.info("No date references detected, skipping date preprocessor")
 
-        # Store the user message
+        # Store the user message (original content, before date enrichment)
         message_args: dict = {
             "userId": context.user_id,
             "role": "user",
@@ -106,6 +105,17 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         logger.info(f"Stored user message in database for chat {context.chat_id}")
 
+        # --- PHASE 2: Immediately fire DB fetch + watchlist inference ---
+
+        # Start DB fetch now (don't await — we'll collect results before step 6)
+        db_fetch_task = asyncio.ensure_future(asyncio.gather(
+            context.async_convex_client.query("users:getUser", {"userId": context.user_id}),
+            context.async_convex_client.query("chats:getChat", {
+                "userId": context.user_id,
+                "chatId": context.chat_id
+            }),
+        ))
+
         # Fire-and-forget watchlist inference (non-blocking)
         asyncio.create_task(
             _infer_watchlist(context.convex_client, context.user_id, context.message_content)
@@ -116,6 +126,16 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         if stripped.lower() == "&help" or stripped.lower().startswith("&help "):
             context.message_content = "I need help. What can you do?"
             logger.info("Detected &help prefix, rewritten to natural language help request")
+
+        # --- PHASE 3: Await date preprocessor, then run module if triggered ---
+
+        # Resolve date context before module invoke (modules may need it)
+        date_context_str = None
+        if date_task:
+            date_preprocessor_result = await date_task
+            date_context: DateContext = date_preprocessor_result.output
+            date_context_str = date_context.to_context_string()
+            logger.info(f"Date context: {date_context_str}")
 
         # Check for module triggers
         module_registry = get_module_registry()
@@ -154,14 +174,9 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             await _send_interim_message(context, text=not_found_text)
             interim_messages.append(not_found_text)
 
-        # Fetch user and chat data in parallel (non-blocking)
-        user, chat_data = await asyncio.gather(
-            context.async_convex_client.query("users:getUser", {"userId": context.user_id}),
-            context.async_convex_client.query("chats:getChat", {
-                "userId": context.user_id,
-                "chatId": context.chat_id
-            }),
-        )
+        # --- PHASE 4: Await DB fetch results (should already be complete by now) ---
+
+        user, chat_data = await db_fetch_task
         needs_onboarding = user and not user.get("onboarding_complete")
 
         # Process Summaries (Oldest to Newest)
