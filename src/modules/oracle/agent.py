@@ -1,7 +1,8 @@
-from pathlib import Path
-from pydantic_ai import Agent, RunContext
-from pydantic import BaseModel, ConfigDict
+import httpx
+import json
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
@@ -12,41 +13,98 @@ from ..base import BaseModule
 
 logger = logging.getLogger(__name__)
 
+MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
+MODEL = "mistral-small-latest"
 
-class OracleContext(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    polymarket_client: PolymarketClient
-    convex_client: ConvexClient
+PROMPT_TEMPLATE = (Path(__file__).parent / "prompt.md").read_text()
+
+# Tool JSON schemas (equivalent to what pydantic-ai auto-generated from docstrings)
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_events",
+            "description": (
+                "Search for prediction events by keyword query. "
+                "Returns up to 10 matching active events with their slugs. "
+                "Use this to find relevant events before fetching detailed market data with get_event."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": 'Search terms (e.g., "bitcoin", "ECB interest rates", "gold price")',
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_event",
+            "description": (
+                "Get prediction market data for an event by its slug. "
+                "Use search_events first to find relevant events and their slugs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": 'The event slug (e.g., "will-bitcoin-hit-100k-in-2025")',
+                    }
+                },
+                "required": ["slug"],
+            },
+        },
+    },
+]
 
 
-agent = Agent(
-    "mistral:mistral-large-latest",
-    deps_type=OracleContext
-)
+async def _call_mistral(
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    reasoning_effort: str | None = None,
+) -> dict:
+    """Call the Mistral chat completions API directly via httpx."""
+    body: dict = {
+        "model": MODEL,
+        "messages": messages,
+    }
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    if reasoning_effort:
+        body["reasoning_effort"] = reasoning_effort
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            MISTRAL_API_URL,
+            headers={
+                "Authorization": f"Bearer {MISTRAL_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
-@agent.tool
-async def search_events(
-    ctx: RunContext[OracleContext],
-    query: str
-) -> str:
-    """
-    Search for prediction events by keyword query.
-    Returns up to 10 matching active events with their slugs.
-    Use this to find relevant events before fetching detailed market data with get_event.
+# ── Tool implementations (same logic as before, without pydantic-ai wrappers) ──
 
-    Args:
-        query: Search terms (e.g., "bitcoin", "ECB interest rates", "gold price")
 
-    Returns:
-        Formatted list of matching events with slugs, titles, and descriptions
-    """
+async def _exec_search_events(convex_client: ConvexClient, query: str) -> str:
+    """Search for prediction events by keyword query."""
     logger.info(f"Tool called: search_events with query='{query}'")
 
     try:
-        events = ctx.deps.convex_client.query(
+        events = convex_client.query(
             "predictionEvents:searchEvents",
-            {"query": query, "limit": 10}
+            {"query": query, "limit": 10},
         )
 
         if not events:
@@ -81,25 +139,12 @@ async def search_events(
         return error_msg
 
 
-@agent.tool
-async def get_event(
-    ctx: RunContext[OracleContext],
-    slug: str
-) -> str:
-    """
-    Get prediction market data for an event by its slug.
-    Use search_events first to find relevant events and their slugs.
-
-    Args:
-        slug: The event slug (e.g., "will-bitcoin-hit-100k-in-2025")
-
-    Returns:
-        Formatted string with event details, market probabilities, price changes, volume, and open interest
-    """
+async def _exec_get_event(polymarket_client: PolymarketClient, slug: str) -> str:
+    """Get prediction market data for an event by its slug."""
     logger.info(f"Tool called: get_event for slug={slug}")
 
     try:
-        data = await ctx.deps.polymarket_client.get_event_by_slug(slug)
+        data = await polymarket_client.get_event_by_slug(slug)
 
         title = data.get("title", "Unknown Event")
         description = data.get("description", "")
@@ -160,7 +205,6 @@ async def get_event(
                     lines.append(f"{i}. {display_name}: N/A{status}")
                 lines.append(f"   Volume: {market_volume_str} | Open Interest: {open_interest_str}")
 
-                # Price changes
                 changes = []
                 if one_day_change is not None:
                     try:
@@ -192,13 +236,76 @@ async def get_event(
         return error_msg
 
 
-PROMPT_TEMPLATE = (Path(__file__).parent / "prompt.md").read_text()
+# ── Tool dispatch ──
+
+TOOL_DISPATCH = {
+    "search_events": lambda ctx, args: _exec_search_events(ctx["convex_client"], **args),
+    "get_event": lambda ctx, args: _exec_get_event(ctx["polymarket_client"], **args),
+}
 
 
-@agent.system_prompt
-def get_system_prompt(ctx: RunContext[OracleContext]) -> str:
+async def _run_oracle_agent(
+    user_input: str,
+    convex_client: ConvexClient,
+    polymarket_client: PolymarketClient,
+) -> str:
+    """
+    Run the Oracle agent loop using the Mistral API directly.
+
+    Step 1 (search): mistral-small-latest, no reasoning — fast keyword extraction
+    Step 2 (select + fetch): mistral-small-latest, reasoning_effort="high" — accurate slug selection
+    No final synthesis step — amprChat handles the conversational wrapping.
+    """
     today = datetime.now().strftime("%B %d, %Y")
-    return f"Today's date is {today}.\n\n" + PROMPT_TEMPLATE
+    system_prompt = f"Today's date is {today}.\n\n" + PROMPT_TEMPLATE
+
+    messages: list[dict] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_input},
+    ]
+
+    tool_ctx = {
+        "convex_client": convex_client,
+        "polymarket_client": polymarket_client,
+    }
+
+    # First iteration: no reasoning (fast keyword extraction for search_events)
+    # Subsequent iterations: reasoning enabled (accurate slug selection from results)
+    max_iterations = 10
+    for iteration in range(max_iterations):
+        reasoning = "high" if iteration > 0 else None
+
+        response = await _call_mistral(messages, tools=TOOLS, reasoning_effort=reasoning)
+        choice = response["choices"][0]
+        assistant_msg = choice["message"]
+
+        messages.append(assistant_msg)
+
+        tool_calls = assistant_msg.get("tool_calls")
+        if not tool_calls:
+            return assistant_msg.get("content", "")
+
+        for tc in tool_calls:
+            fn_name = tc["function"]["name"]
+            fn_args = json.loads(tc["function"]["arguments"])
+
+            handler = TOOL_DISPATCH.get(fn_name)
+            if handler:
+                result = await handler(tool_ctx, fn_args)
+            else:
+                result = f"ERROR: Unknown tool '{fn_name}'"
+
+            messages.append({
+                "role": "tool",
+                "name": fn_name,
+                "content": result,
+                "tool_call_id": tc["id"],
+            })
+
+    return "Oracle could not resolve the request after multiple tool calls."
+
+
+# ── Module class (public interface unchanged) ──
 
 
 class OracleModule(BaseModule):
@@ -221,16 +328,6 @@ class OracleModule(BaseModule):
         return get_client()
 
     async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
-        """
-        Process a user message and return prediction market data.
-
-        Args:
-            message: The full user message (including &oracle mention)
-            date_context: Optional resolved date context from preprocessor
-
-        Returns:
-            Prediction market data response as a string
-        """
         try:
             logger.info(f"Oracle invoked with message: {message}")
 
@@ -239,16 +336,13 @@ class OracleModule(BaseModule):
                 agent_input = f"{message}\n\n{date_context}"
                 logger.info(f"Oracle using date context: {date_context}")
 
-            context = OracleContext(
+            response = await _run_oracle_agent(
+                agent_input,
+                convex_client=self._get_convex_client(),
                 polymarket_client=self.polymarket_client,
-                convex_client=self._get_convex_client()
             )
 
-            result = await agent.run(agent_input, deps=context)
-
-            response = result.output
             logger.info(f"Oracle response: {response}")
-
             return response
 
         except Exception as e:
