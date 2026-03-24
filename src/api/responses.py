@@ -213,6 +213,16 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         # Create a context string that includes summaries, message history and the current message
         if module_response:
+            # Build module-specific presentation instructions if available
+            response_instructions = module_registry.get_response_instructions(module_name) if module_name else ""
+            if response_instructions:
+                presentation_guidance = f"""IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.
+
+        MODULE-SPECIFIC FORMATTING:
+        {response_instructions}"""
+            else:
+                presentation_guidance = "IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided."
+
             context_str = f"""
         [LONG TERM MEMORY / SUMMARIES]
         The following are summaries of earlier conversation parts (chronological order):
@@ -230,7 +240,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         A specialized module has processed this request and returned the following response:
         {module_response}
 
-        IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.
+        {presentation_guidance}
         """
         else:
             # Build optional module-not-found section

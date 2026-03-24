@@ -218,6 +218,12 @@ async def call_specialist_module(
             ctx.deps.invoked_modules.append(module_name)
 
         logger.info(f"Tool result: call_specialist_module for {module_name} succeeded")
+
+        # Prepend module-specific response instructions if available
+        response_instructions = registry.get_response_instructions(module_name)
+        if response_instructions:
+            result = f"[RESPONSE FORMATTING INSTRUCTIONS]\n{response_instructions}\n[MODULE DATA]\n{result}"
+
         return result
     except Exception as e:
         error_msg = f"Module '{module_name}' failed: {str(e)}"

@@ -50,6 +50,7 @@ class ModuleRegistry:
                     description=module_config.get('description', ''),
                     intents=module_config.get('intents', []),
                     notification_types=module_config.get('notification_types', []),
+                    response_instructions=module_config.get('response_instructions', ''),
                 )
 
             logger.info(f"Loaded {len(self.modules)} module(s) from registry")
@@ -67,6 +68,7 @@ class ModuleRegistry:
         description: str = "",
         intents: List[str] = None,
         notification_types: List[Dict] = None,
+        response_instructions: str = "",
     ):
         """
         Register a single module.
@@ -78,6 +80,7 @@ class ModuleRegistry:
             description: Human-readable description of the module
             intents: List of intent keywords the module handles
             notification_types: Notification type definitions from modules.yaml
+            response_instructions: Instructions for amprChat on how to present this module's data
         """
         try:
             module = import_module(f"{path}.agent")
@@ -96,6 +99,7 @@ class ModuleRegistry:
                 "intents": intents or [],
                 "trigger": trigger,
                 "notification_types": notification_types or [],
+                "response_instructions": response_instructions,
             }
 
             logger.info(f"Registered module: {name} with trigger: {trigger}")
@@ -173,6 +177,11 @@ class ModuleRegistry:
             })
         return result
 
+
+    def get_response_instructions(self, name: str) -> str:
+        """Get response instructions for a module, if defined."""
+        meta = self.metadata.get(name, {})
+        return meta.get("response_instructions", "")
 
     def get_notification_types_for_module(self, name: str) -> List[Dict]:
         """
