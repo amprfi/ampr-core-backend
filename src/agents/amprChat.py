@@ -219,10 +219,16 @@ async def call_specialist_module(
 
         logger.info(f"Tool result: call_specialist_module for {module_name} succeeded")
 
-        # Prepend module-specific response instructions if available
+        # Prepend module-specific response instructions and constraints if available
         response_instructions = registry.get_response_instructions(module_name)
+        constraints = registry.get_constraints_for_module(module_name)
+        instructions_block = ""
         if response_instructions:
-            result = f"[RESPONSE FORMATTING INSTRUCTIONS]\n{response_instructions}\n[MODULE DATA]\n{result}"
+            instructions_block += f"[RESPONSE FORMATTING INSTRUCTIONS]\n{response_instructions}\n"
+        if constraints:
+            instructions_block += "[MODULE CONSTRAINTS]\n" + "\n".join(f"- {c}" for c in constraints) + "\n"
+        if instructions_block:
+            result = f"{instructions_block}[MODULE DATA]\n{result}"
 
         return result
     except Exception as e:

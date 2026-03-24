@@ -41,6 +41,8 @@ modules:
     path: "src.modules.oracle"
     enabled: true
     description: "Prediction markets specialist powered by Polymarket data"
+    constraints:
+      - "Does NOT support notifications or alerts — do not offer to set notifications for prediction market events"
     intents:
       - "Probability or likelihood of a future event (elections, rate decisions, economic outcomes)"
       - "Prediction market prices or odds for tracked events"

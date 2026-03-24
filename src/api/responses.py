@@ -215,13 +215,14 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         if module_response:
             # Build module-specific presentation instructions if available
             response_instructions = module_registry.get_response_instructions(module_name) if module_name else ""
+            constraints = module_registry.get_constraints_for_module(module_name) if module_name else []
+            extra_sections = ""
             if response_instructions:
-                presentation_guidance = f"""IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.
-
-        MODULE-SPECIFIC FORMATTING:
-        {response_instructions}"""
-            else:
-                presentation_guidance = "IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided."
+                extra_sections += f"\n\n        MODULE-SPECIFIC FORMATTING:\n        {response_instructions}"
+            if constraints:
+                constraints_str = "\n        ".join(f"- {c}" for c in constraints)
+                extra_sections += f"\n\n        MODULE CONSTRAINTS:\n        {constraints_str}"
+            presentation_guidance = f"IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.{extra_sections}"
 
             context_str = f"""
         [LONG TERM MEMORY / SUMMARIES]

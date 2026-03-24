@@ -183,6 +183,11 @@ class ModuleRegistry:
         meta = self.metadata.get(name, {})
         return meta.get("response_instructions", "")
 
+    def get_constraints_for_module(self, name: str) -> List[str]:
+        """Get constraints for a module, if defined."""
+        meta = self.metadata.get(name, {})
+        return meta.get("constraints", [])
+
     def get_notification_types_for_module(self, name: str) -> List[Dict]:
         """
         Get notification type definitions for a module from modules.yaml metadata.
