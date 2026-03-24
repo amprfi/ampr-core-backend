@@ -121,7 +121,7 @@ class DatePreprocessorAgent:
         body = {
             "model": MODEL,
             "messages": messages,
-            "reasoning_effort": "medium",
+            "reasoning_effort": "high",
             "response_format": {"type": "json_object"},
         }
 
