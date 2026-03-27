@@ -20,6 +20,7 @@ export const predictionEvents = defineTable({
   .index("by_slug", ["slug"])
   .index("by_polymarketId", ["polymarketId"])
   .index("by_active", ["active"])
+  .index("by_active_historical", ["active", "historical"])
   .searchIndex("search_events", {
     searchField: "searchText",
     filterFields: ["active"],

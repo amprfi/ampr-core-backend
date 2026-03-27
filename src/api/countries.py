@@ -50,26 +50,6 @@ async def create_country(country: Country) -> Dict[str, Any]:
         )
 
 
-@router.put("/countries/{country_code}")
-async def update_country(country_code: str, country: CountryUpdate) -> Dict[str, Any]:
-    """Update an existing country."""
-    if country.country_code.upper() != country_code.upper():
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"error": "country_code in path and body must match"},
-        )
-
-    update_data = {k: v for k, v in country.model_dump().items() if v is not None}
-
-    try:
-        return client.mutation("countries:updateCountry", update_data)
-    except ConvexError as e:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"error": str(e.data)},
-        )
-
-
 @router.post("/countries/bulk", status_code=HTTPStatus.OK)
 async def bulk_upsert_countries(request: BulkCountriesRequest) -> BulkUpsertResult:
     """
@@ -111,6 +91,26 @@ async def bulk_update_currencies(request: BulkCurrencyUpdateRequest) -> BulkCurr
             errors.append(f"{country_code}: {str(e)}")
 
     return BulkCurrencyUpdateResult(updated=updated, errors=errors)
+
+
+@router.put("/countries/{country_code}")
+async def update_country(country_code: str, country: CountryUpdate) -> Dict[str, Any]:
+    """Update an existing country."""
+    if country.country_code.upper() != country_code.upper():
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"error": "country_code in path and body must match"},
+        )
+
+    update_data = {k: v for k, v in country.model_dump().items() if v is not None}
+
+    try:
+        return client.mutation("countries:updateCountry", update_data)
+    except ConvexError as e:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"error": str(e.data)},
+        )
 
 
 @router.delete("/countries/{country_code}")

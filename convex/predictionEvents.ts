@@ -212,8 +212,9 @@ export const getInactiveEvents = query({
   handler: async (ctx) => {
     return await ctx.db
       .query("predictionEvents")
-      .withIndex("by_active", (q) => q.eq("active", false))
-      .filter((q) => q.eq(q.field("historical"), false))
+      .withIndex("by_active_historical", (q) =>
+        q.eq("active", false).eq("historical", false)
+      )
       .collect();
   },
 });
