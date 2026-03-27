@@ -453,6 +453,77 @@ async def manage_price_alert(
         return f"ERROR: {error_msg}"
 
 
+@agent.tool
+async def update_user_profile(
+    ctx: RunContext[TalkerContext],
+    country_name: Optional[str] = None,
+    preferred_currency: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> str:
+    """
+    Update the user's profile information. Use this when the user confirms they want to update
+    their profile (e.g., after a profile update suggestion, or when they directly ask to update
+    their country, currency, email, or phone).
+
+    Args:
+        country_name: Country name or ISO 3166-1 alpha-3 code (e.g., "Canada", "CAN")
+        preferred_currency: ISO 4217 currency code (e.g., "USD", "CAD", "EUR")
+        email: User's email address
+        phone: User's phone number
+    """
+    logger.info(f"Tool called: update_user_profile for user_id={ctx.deps.user_id}")
+    convex = ctx.deps.convex_client
+    results = []
+
+    if country_name:
+        # Look up country
+        country = convex.query("countries:getCountryByCode", {
+            "country_code": country_name.upper()
+        })
+        if not country:
+            all_countries = convex.query("countries:getCountries", {})
+            for c in all_countries:
+                if country_name.lower() in c["country_name"].lower():
+                    country = c
+                    break
+        if country:
+            convex.mutation("profiles:updateProfile", {
+                "user": ctx.deps.user_id,
+                "country": country["_id"]
+            })
+            results.append(f"country to {country['country_name']}")
+        else:
+            results.append(f"could not find country '{country_name}'")
+
+    if preferred_currency:
+        code = preferred_currency.upper().strip()
+        convex.mutation("profiles:updateProfile", {
+            "user": ctx.deps.user_id,
+            "preferred_currency": code
+        })
+        results.append(f"preferred currency to {code}")
+
+    if email:
+        convex.mutation("users:updateUser", {
+            "id": ctx.deps.user_id,
+            "email": email
+        })
+        results.append(f"email to {email}")
+
+    if phone:
+        convex.mutation("users:updateUser", {
+            "id": ctx.deps.user_id,
+            "phone": phone
+        })
+        results.append(f"phone to {phone}")
+
+    if not results:
+        return "No profile fields to update."
+
+    return f"Successfully updated: {', '.join(results)}"
+
+
 PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/ampr_chat.md").read_text()
 
 @agent.system_prompt

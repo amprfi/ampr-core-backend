@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException
 from src.clients.convex_client import get_client
 from src.models.country import (
     BulkCountriesRequest,
+    BulkCurrencyUpdateRequest,
+    BulkCurrencyUpdateResult,
     BulkUpsertResult,
     Country,
     CountryUpdate,
@@ -84,6 +86,31 @@ async def bulk_upsert_countries(request: BulkCountriesRequest) -> BulkUpsertResu
             status_code=HTTPStatus.BAD_REQUEST,
             detail={"error": str(e.data)},
         )
+
+
+@router.put("/countries/bulk-currencies")
+async def bulk_update_currencies(request: BulkCurrencyUpdateRequest) -> BulkCurrencyUpdateResult:
+    """
+    Bulk update currency codes on existing country records.
+
+    Accepts a mapping of country codes to currency codes and updates each country.
+    """
+    updated = 0
+    errors: List[str] = []
+
+    for country_code, currency in request.currencies.items():
+        try:
+            client.mutation(
+                "countries:updateCountry",
+                {"country_code": country_code, "currency": currency},
+            )
+            updated += 1
+        except ConvexError as e:
+            errors.append(f"{country_code}: {str(e.data)}")
+        except Exception as e:
+            errors.append(f"{country_code}: {str(e)}")
+
+    return BulkCurrencyUpdateResult(updated=updated, errors=errors)
 
 
 @router.delete("/countries/{country_code}")

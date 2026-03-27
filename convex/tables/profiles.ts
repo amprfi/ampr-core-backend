@@ -51,6 +51,9 @@ export const profiles = defineTable({
   inferred_financial_goals: v.optional(v.array(v.string())),
   inferred_investment_thesis: v.optional(v.string()),
   
+  // User's preferred currency for display (ISO 4217 code, e.g., "USD", "CAD")
+  preferred_currency: v.optional(v.string()),
+  
   // Timezone for notification delivery windows (e.g., "America/New_York")
   timezone: v.optional(v.string()),
 })

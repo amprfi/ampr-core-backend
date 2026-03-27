@@ -4,6 +4,7 @@ import { v } from "convex/values";
 export const countries = defineTable({
   country_code: v.string(),
   country_name: v.string(),
+  currency: v.optional(v.string()),
   utc_offset: v.number(),
   calling_code: v.string(),
   ofac_country_program: v.boolean(),

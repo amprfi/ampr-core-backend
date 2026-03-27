@@ -15,6 +15,7 @@ class Country(BaseModel):
     eu_tax_haven_blacklist: bool = Field(default=False, description="On EU tax haven blacklist")
     ampersand_blocklist_full: bool = Field(default=False, description="Fully blocked by Ampersand")
     ampersand_blocklist_funding: bool = Field(default=False, description="Funding blocked by Ampersand")
+    currency: Optional[str] = Field(default=None, description="ISO 4217 currency code (e.g., 'USD', 'CAD')")
     ampersand_additional_screening_required: bool = Field(default=False, description="Requires additional screening")
 
 
@@ -23,6 +24,7 @@ class CountryUpdate(BaseModel):
 
     country_code: str = Field(..., description="ISO 3166-1 alpha-3 country code")
     country_name: Optional[str] = None
+    currency: Optional[str] = None
     utc_offset: Optional[float] = None
     calling_code: Optional[str] = None
     ofac_country_program: Optional[bool] = None
@@ -44,5 +46,21 @@ class BulkUpsertResult(BaseModel):
     """Result of bulk upsert operation."""
 
     inserted: int
+    updated: int
+    errors: List[str]
+
+
+class BulkCurrencyUpdateRequest(BaseModel):
+    """Request model for bulk currency update."""
+
+    currencies: dict[str, str] = Field(
+        ...,
+        description="Mapping of ISO 3166-1 alpha-3 country codes to ISO 4217 currency codes (e.g., {'USA': 'USD', 'CAN': 'CAD'})",
+    )
+
+
+class BulkCurrencyUpdateResult(BaseModel):
+    """Result of bulk currency update operation."""
+
     updated: int
     errors: List[str]

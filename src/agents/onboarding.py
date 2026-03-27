@@ -26,23 +26,17 @@ async def get_user_info(ctx: RunContext[OnboardingContext]) -> dict:
     Returns user fields like first_name, last_name, email, phone, telegram_id.
     """
     logger.info(f"Tool called: get_user_info for user_id={ctx.deps.user_id}")
-    try:
-        user = ctx.deps.convex_client.query("users:getUser", {"userId": ctx.deps.user_id})
-        if not user:
-            raise ValueError(f"User {ctx.deps.user_id} not found")
-        
-        logger.info(f"Tool result: get_user_info returned user data")
-        return {
-            "first_name": user.get("first_name"),
-            "last_name": user.get("last_name"),
-            "email": user.get("email"),
-            "phone": user.get("phone"),
-            "telegram_id": user.get("telegram_id")
-        }
-    except Exception as e:
-        error_msg = f"Error retrieving user info: {str(e)}"
-        logger.error(f"Tool error: get_user_info - {error_msg}")
-        return {"error": error_msg}
+    user = ctx.deps.convex_client.query("users:getUser", {"userId": ctx.deps.user_id})
+    if not user:
+        raise ValueError(f"User {ctx.deps.user_id} not found")
+    
+    return {
+        "first_name": user.get("first_name"),
+        "last_name": user.get("last_name"),
+        "email": user.get("email"),
+        "phone": user.get("phone"),
+        "telegram_id": user.get("telegram_id")
+    }
 
 @agent.tool
 async def update_user_info(
@@ -59,33 +53,27 @@ async def update_user_info(
     Returns success message or error.
     """
     logger.info(f"Tool called: update_user_info for user_id={ctx.deps.user_id}")
-    try:
-        update_data = {}
-        if first_name is not None:
-            update_data["first_name"] = first_name
-        if last_name is not None:
-            update_data["last_name"] = last_name
-        if email is not None:
-            update_data["email"] = email
-        if phone is not None:
-            update_data["phone"] = phone
-        if telegram_id is not None:
-            update_data["telegram_id"] = telegram_id
-        
-        if not update_data:
-            return "No fields to update"
-        
-        ctx.deps.convex_client.mutation("users:updateUser", {
-            "id": ctx.deps.user_id,
-            **update_data
-        })
-        
-        logger.info(f"Tool result: update_user_info updated fields: {list(update_data.keys())}")
-        return f"Successfully updated: {', '.join(update_data.keys())}"
-    except Exception as e:
-        error_msg = f"Error updating user info: {str(e)}"
-        logger.error(f"Tool error: update_user_info - {error_msg}")
-        return error_msg
+    update_data = {}
+    if first_name is not None:
+        update_data["first_name"] = first_name
+    if last_name is not None:
+        update_data["last_name"] = last_name
+    if email is not None:
+        update_data["email"] = email
+    if phone is not None:
+        update_data["phone"] = phone
+    if telegram_id is not None:
+        update_data["telegram_id"] = telegram_id
+    
+    if not update_data:
+        return "No fields to update"
+    
+    ctx.deps.convex_client.mutation("users:updateUser", {
+        "id": ctx.deps.user_id,
+        **update_data
+    })
+    
+    return f"Successfully updated: {', '.join(update_data.keys())}"
 
 @agent.tool
 async def set_user_country(
@@ -98,35 +86,60 @@ async def set_user_country(
     Looks up the country in the database and updates the user's profile.
     """
     logger.info(f"Tool called: set_user_country for user_id={ctx.deps.user_id}, country_name={country_name}")
-    try:
-        # Try looking up by code first (uppercase)
-        country = ctx.deps.convex_client.query("countries:getCountryByCode", {
-            "country_code": country_name.upper()
-        })
+    # Try looking up by code first (uppercase)
+    country = ctx.deps.convex_client.query("countries:getCountryByCode", {
+        "country_code": country_name.upper()
+    })
 
-        if not country:
-            # Search all countries by name (case-insensitive partial match)
-            all_countries = ctx.deps.convex_client.query("countries:getCountries", {})
-            for c in all_countries:
-                if country_name.lower() in c["country_name"].lower():
-                    country = c
-                    break
+    if not country:
+        # Search all countries by name (case-insensitive partial match)
+        all_countries = ctx.deps.convex_client.query("countries:getCountries", {})
+        for c in all_countries:
+            if country_name.lower() in c["country_name"].lower():
+                country = c
+                break
 
-        if not country:
-            return f"Could not find country '{country_name}'. Please try again with the full country name or 3-letter code."
+    if not country:
+        return f"Could not find country '{country_name}'. Please try again with the full country name or 3-letter code."
 
-        # Upsert the profile with the country
-        ctx.deps.convex_client.mutation("profiles:updateProfile", {
-            "user": ctx.deps.user_id,
-            "country": country["_id"]
-        })
+    logger.info(f"Resolved country: id={country['_id']}, code={country['country_code']}, name={country['country_name']}")
 
-        logger.info(f"Tool result: set_user_country set country to {country['country_name']} ({country['country_code']})")
-        return f"Country set to {country['country_name']}"
-    except Exception as e:
-        error_msg = f"Error setting country: {str(e)}"
-        logger.error(f"Tool error: set_user_country - {error_msg}")
-        return error_msg
+    # Upsert the profile with the country
+    updated_profile = ctx.deps.convex_client.mutation("profiles:updateProfile", {
+        "user": ctx.deps.user_id,
+        "country": country["_id"]
+    })
+
+    # Verify the write persisted
+    if not updated_profile or updated_profile.get("country") != country["_id"]:
+        raise RuntimeError(f"Country update did not persist for user {ctx.deps.user_id}")
+
+    currency = country.get("currency")
+    if currency:
+        return f"Country set to {country['country_name']}. The local currency is {currency}."
+    return f"Country set to {country['country_name']}"
+
+@agent.tool
+async def set_user_currency(
+    ctx: RunContext[OnboardingContext],
+    currency_code: str
+) -> str:
+    """
+    Set the user's preferred currency on their profile.
+    Accepts an ISO 4217 currency code (e.g., "USD", "CAD", "EUR", "GBP").
+    """
+    logger.info(f"Tool called: set_user_currency for user_id={ctx.deps.user_id}, currency_code={currency_code}")
+    code = currency_code.upper().strip()
+
+    updated_profile = ctx.deps.convex_client.mutation("profiles:updateProfile", {
+        "user": ctx.deps.user_id,
+        "preferred_currency": code
+    })
+
+    if not updated_profile or updated_profile.get("preferred_currency") != code:
+        raise RuntimeError(f"Currency update did not persist for user {ctx.deps.user_id}")
+
+    return f"Preferred currency set to {code}"
 
 @agent.tool
 async def complete_onboarding(ctx: RunContext[OnboardingContext]) -> str:
@@ -135,17 +148,11 @@ async def complete_onboarding(ctx: RunContext[OnboardingContext]) -> str:
     Call this when the user has provided their name OR declined to provide additional info.
     """
     logger.info(f"Tool called: complete_onboarding for user_id={ctx.deps.user_id}")
-    try:
-        ctx.deps.convex_client.mutation("users:updateUser", {
-            "id": ctx.deps.user_id,
-            "onboarding_complete": True
-        })
-        logger.info(f"Tool result: Onboarding marked complete for user {ctx.deps.user_id}")
-        return "Onboarding marked as complete"
-    except Exception as e:
-        error_msg = f"Error completing onboarding: {str(e)}"
-        logger.error(f"Tool error: complete_onboarding - {error_msg}")
-        return error_msg
+    ctx.deps.convex_client.mutation("users:updateUser", {
+        "id": ctx.deps.user_id,
+        "onboarding_complete": True
+    })
+    return "Onboarding marked as complete"
 
 ONBOARDING_PROMPT = (Path(__file__).parent / "prompts/onboarding.md").read_text()
 

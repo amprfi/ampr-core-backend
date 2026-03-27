@@ -7,6 +7,7 @@ import { mutation, query } from "./_generated/server";
 const countryRecord = v.object({
   country_code: v.string(),
   country_name: v.string(),
+  currency: v.optional(v.string()),
   utc_offset: v.number(),
   calling_code: v.string(),
   ofac_country_program: v.boolean(),
@@ -84,6 +85,7 @@ export const updateCountry = mutation({
   args: {
     country_code: v.string(),
     country_name: v.optional(v.string()),
+    currency: v.optional(v.string()),
     utc_offset: v.optional(v.number()),
     calling_code: v.optional(v.string()),
     ofac_country_program: v.optional(v.boolean()),
