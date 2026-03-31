@@ -9,6 +9,7 @@ from pydantic_ai.agent.abstract import RunOutputDataT
 from src.models.user_profile import UserProfile
 from src.utils.preprocessing import profile_to_sentences
 from src.modules.registry import get_module_registry
+from src.agents.currency_converter import convert_currency
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +219,31 @@ async def call_specialist_module(
             ctx.deps.invoked_modules.append(module_name)
 
         logger.info(f"Tool result: call_specialist_module for {module_name} succeeded")
+
+        # Convert to user's preferred currency if needed
+        try:
+            currency_result = ctx.deps.convex_client.query(
+                "profiles:getUserCurrency", {"userId": ctx.deps.user_id}
+            )
+            preferred_currency = currency_result.get("preferred_currency") if currency_result else None
+
+            if preferred_currency and preferred_currency.upper() != "USD":
+                logger.info(f"User prefers {preferred_currency}, converting module response")
+                result = await convert_currency(result, preferred_currency)
+        except Exception as e:
+            logger.warning(f"Currency conversion failed, using original USD response: {e}")
+
+        # Prepend module-specific response instructions and constraints if available
+        response_instructions = registry.get_response_instructions(module_name)
+        constraints = registry.get_constraints_for_module(module_name)
+        instructions_block = ""
+        if response_instructions:
+            instructions_block += f"[RESPONSE FORMATTING INSTRUCTIONS]\n{response_instructions}\n"
+        if constraints:
+            instructions_block += "[MODULE CONSTRAINTS]\n" + "\n".join(f"- {c}" for c in constraints) + "\n"
+        if instructions_block:
+            result = f"{instructions_block}[MODULE DATA]\n{result}"
+
         return result
     except Exception as e:
         error_msg = f"Module '{module_name}' failed: {str(e)}"
@@ -439,6 +465,213 @@ async def manage_price_alert(
         error_msg = f"Error managing price alert: {str(e)}"
         logger.error(f"Tool error: manage_price_alert - {error_msg}")
         return f"ERROR: {error_msg}"
+
+
+@agent.tool
+async def manage_prediction_alert(
+    ctx: RunContext[TalkerContext],
+    action: str,
+    event_query: str,
+    event_slug: Optional[str] = None,
+    alert_kind: Optional[str] = None,
+    threshold_pct: Optional[float] = None,
+) -> str:
+    """
+    Manage prediction market alerts for a prediction event (Oracle module).
+
+    Args:
+        action: One of "set", "remove", "list".
+            - "set": Add event to watchlist and create default alerts (24h: 5%, 7d: 10%).
+              Optionally override a specific threshold with alert_kind + threshold_pct.
+            - "remove": Remove prediction alerts for an event.
+            - "list": List the user's active prediction alerts.
+        event_query: The event title or search query to find the event.
+            For "list", pass "all" to show all alerts.
+        event_slug: Optional Polymarket event slug for exact lookup (e.g., "fed-decision-in-july-181").
+            Preferred over event_query when available from a prior Oracle response.
+            Always pass the slug if the Oracle module already resolved the event.
+        alert_kind: Optional for "set". One of:
+            - "percentage_24h": Override the 24h probability change threshold.
+            - "percentage_7d": Override the 7d probability change threshold.
+            If omitted, both default thresholds are created automatically.
+        threshold_pct: Optional for "set". Custom threshold as a decimal (e.g., 0.05 for 5%).
+            Only used when alert_kind is also provided.
+
+    Returns:
+        Status message describing the result.
+    """
+    logger.info(f"Tool called: manage_prediction_alert action={action}, event={event_query}, slug={event_slug}")
+    convex = ctx.deps.convex_client
+    user_id = ctx.deps.user_id
+
+    try:
+        if action == "list":
+            alerts = convex.query("predictionAlerts:getUserAlerts", {"user": user_id})
+            if not alerts:
+                return "You have no active prediction alerts."
+
+            lines = []
+            for alert in alerts:
+                event = convex.query("predictionEvents:getEvent", {"id": alert["event"]}) if alert.get("event") else None
+                label = event.get("title", "Unknown") if event else "Default"
+
+                period = "24h" if alert["alert_kind"] == "percentage_24h" else "7d"
+                threshold = alert.get("threshold_pct", 0)
+                lines.append(f"- {label}: {period} probability change exceeds {threshold:.0%}")
+
+            return "Your active prediction alerts:\n" + "\n".join(lines)
+
+        # Resolve event: prefer slug lookup, fall back to search
+        event = None
+        if event_slug:
+            event = convex.query("predictionEvents:getEventBySlug", {"slug": event_slug})
+
+        if not event:
+            events = convex.query("predictionEvents:searchEvents", {"query": event_query, "limit": 1})
+            if events:
+                event = events[0]
+
+        if not event:
+            return f"ERROR: No prediction event found matching '{event_query}'."
+
+        event_id = event["_id"]
+
+        if action == "remove":
+            removed = convex.mutation("predictionAlerts:removeAlertsByUserEvent", {
+                "user": user_id,
+                "event": event_id,
+            })
+            return f"Removed {removed} prediction alert(s) for '{event.get('title', event_query)}'."
+
+        elif action == "set":
+            # Add event to watchlistEvents as stated watch
+            convex.mutation("watchlistEvents:addToWatchlist", {
+                "user": user_id,
+                "event": event_id,
+            })
+
+            # Register default alerts (both 24h and 7d) via the oracle module
+            registry = get_module_registry()
+            oracle_module = registry.get_module("oracle")
+            if oracle_module and hasattr(oracle_module, "register_notifications"):
+                await oracle_module.register_notifications(user_id, event_id)
+
+            # If custom alert_kind/threshold provided, override that specific default
+            if alert_kind and threshold_pct is not None:
+                # Normalize: LLM may pass 5 instead of 0.05 for "5%"
+                if threshold_pct >= 1:
+                    threshold_pct = threshold_pct / 100
+                module = convex.query("notifications:getModuleByName", {"name": "oracle"})
+                if not module:
+                    return "ERROR: Oracle module not registered."
+
+                type_name = "probability_change_24h" if alert_kind == "percentage_24h" else "probability_change_7d"
+                notif_type = convex.query("notifications:getNotificationTypeByName", {
+                    "module": module["_id"],
+                    "name": type_name,
+                })
+                if not notif_type:
+                    return f"ERROR: Notification type '{type_name}' not registered."
+
+                convex.mutation("predictionAlerts:setPercentageThreshold", {
+                    "user": user_id,
+                    "event": event_id,
+                    "alert_kind": alert_kind,
+                    "notification_type": notif_type["_id"],
+                    "threshold_pct": threshold_pct,
+                })
+
+                period = "24-hour" if alert_kind == "percentage_24h" else "7-day"
+                return (
+                    f"Alert set for '{event.get('title', event_query)}': "
+                    f"{period} probability change threshold set to {threshold_pct:.0%}. "
+                    f"Default alert also created for the other timeframe."
+                )
+
+            title = event.get("title", event_query)
+            return (
+                f"Alerts set for '{title}': you'll be notified when any market's "
+                f"probability shifts by 5%+ in 24 hours or 10%+ in 7 days."
+            )
+
+        else:
+            return f"ERROR: Unknown action '{action}'. Use 'set', 'remove', or 'list'."
+
+    except Exception as e:
+        error_msg = f"Error managing prediction alert: {str(e)}"
+        logger.error(f"Tool error: manage_prediction_alert - {error_msg}")
+        return f"ERROR: {error_msg}"
+
+
+@agent.tool
+async def update_user_profile(
+    ctx: RunContext[TalkerContext],
+    country_name: Optional[str] = None,
+    preferred_currency: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> str:
+    """
+    Update the user's profile information. Use this when the user confirms they want to update
+    their profile (e.g., after a profile update suggestion, or when they directly ask to update
+    their country, currency, email, or phone).
+
+    Args:
+        country_name: Country name or ISO 3166-1 alpha-3 code (e.g., "Canada", "CAN")
+        preferred_currency: ISO 4217 currency code (e.g., "USD", "CAD", "EUR")
+        email: User's email address
+        phone: User's phone number
+    """
+    logger.info(f"Tool called: update_user_profile for user_id={ctx.deps.user_id}")
+    convex = ctx.deps.convex_client
+    results = []
+
+    if country_name:
+        # Look up country
+        country = convex.query("countries:getCountryByCode", {
+            "country_code": country_name.upper()
+        })
+        if not country:
+            all_countries = convex.query("countries:getCountries", {})
+            for c in all_countries:
+                if country_name.lower() in c["country_name"].lower():
+                    country = c
+                    break
+        if country:
+            convex.mutation("profiles:updateProfile", {
+                "user": ctx.deps.user_id,
+                "country": country["_id"]
+            })
+            results.append(f"country to {country['country_name']}")
+        else:
+            results.append(f"could not find country '{country_name}'")
+
+    if preferred_currency:
+        code = preferred_currency.upper().strip()
+        convex.mutation("profiles:updateProfile", {
+            "user": ctx.deps.user_id,
+            "preferred_currency": code
+        })
+        results.append(f"preferred currency to {code}")
+
+    if email:
+        convex.mutation("users:updateUser", {
+            "id": ctx.deps.user_id,
+            "email": email
+        })
+        results.append(f"email to {email}")
+
+    if phone:
+        convex.mutation("users:updateUser", {
+            "id": ctx.deps.user_id,
+            "phone": phone
+        })
+        results.append(f"phone to {phone}")
+
+    if not results:
+        return "No profile fields to update."
+
+    return f"Successfully updated: {', '.join(results)}"
 
 
 PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/ampr_chat.md").read_text()

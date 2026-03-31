@@ -71,6 +71,21 @@ export const getUserCountry = query({
 });
 
 /**
+ * Get user's preferred currency code (lightweight query for currency conversion)
+ */
+export const getUserCurrency = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const profile = await ctx.db
+      .query("profiles")
+      .withIndex("by_user", (q) => q.eq("user", args.userId))
+      .unique();
+
+    return { preferred_currency: profile?.preferred_currency ?? null };
+  },
+});
+
+/**
  * Create a new user profile
  * 
  * Throws error if profile already exists for this user
@@ -91,6 +106,7 @@ export const createProfile = mutation({
     inferred_investment_knowledge: v.optional(InvestmentKnowledge),
     inferred_financial_goals: v.optional(v.array(v.string())),
     inferred_investment_thesis: v.optional(v.string()),
+    preferred_currency: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const existingProfile = await ctx.db
@@ -119,6 +135,7 @@ export const createProfile = mutation({
       inferred_investment_knowledge: args.inferred_investment_knowledge,
       inferred_financial_goals: args.inferred_financial_goals,
       inferred_investment_thesis: args.inferred_investment_thesis,
+      preferred_currency: args.preferred_currency,
     });
 
     return await ctx.db.get(profileId);
@@ -146,6 +163,7 @@ export const updateProfile = mutation({
     inferred_investment_knowledge: v.optional(InvestmentKnowledge),
     inferred_financial_goals: v.optional(v.array(v.string())),
     inferred_investment_thesis: v.optional(v.string()),
+    preferred_currency: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     let profile = await ctx.db
@@ -205,6 +223,8 @@ export const updateProfile = mutation({
     }
     if (args.inferred_investment_thesis !== undefined)
       updates.inferred_investment_thesis = args.inferred_investment_thesis;
+    if (args.preferred_currency !== undefined)
+      updates.preferred_currency = args.preferred_currency;
 
     await ctx.db.patch(profile._id, updates);
 

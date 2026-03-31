@@ -18,6 +18,7 @@ from ..agents.extractor import get_extractor_agent, ExtractorContext, HORIZON_MA
 from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..agents.watchlist_inferrer import infer_watchlist
+from ..agents.currency_converter import convert_currency
 from ..modules.registry import get_module_registry
 from ..utils.formatting import strip_markdown
 from ..clients.async_convex_client import AsyncConvexClient, get_async_client
@@ -74,22 +75,21 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
     try:
         logger.info(f"Generating AI response for {context.channel} message in chat {context.chat_id}")
 
-        # Conditionally run date preprocessor only if message likely contains date references
-        date_context_str = None
+        # --- PHASE 1: Kick off date preprocessor + store message concurrently ---
+
+        # Start date preprocessor in background (don't await yet)
+        date_task = None
         if has_date_references(context.message_content):
-            logger.info("Date references detected, running date preprocessor")
+            logger.info("Date references detected, starting date preprocessor concurrently")
             date_preprocessor_agent = get_date_preprocessor_agent()
             date_preprocessor_context = DatePreprocessorContext()
-
-            date_preprocessor_result = await date_preprocessor_agent.run(context.message_content, deps=date_preprocessor_context)
-            date_context: DateContext = date_preprocessor_result.output
-            date_context_str = date_context.to_context_string()
-
-            logger.info(f"Date context: {date_context_str}")
+            date_task = asyncio.create_task(
+                date_preprocessor_agent.run(context.message_content, deps=date_preprocessor_context)
+            )
         else:
             logger.info("No date references detected, skipping date preprocessor")
 
-        # Store the user message
+        # Store the user message (original content, before date enrichment)
         message_args: dict = {
             "userId": context.user_id,
             "role": "user",
@@ -106,6 +106,17 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         logger.info(f"Stored user message in database for chat {context.chat_id}")
 
+        # --- PHASE 2: Immediately fire DB fetch + watchlist inference ---
+
+        # Start DB fetch now (don't await — we'll collect results before step 6)
+        db_fetch_task = asyncio.ensure_future(asyncio.gather(
+            context.async_convex_client.query("users:getUser", {"userId": context.user_id}),
+            context.async_convex_client.query("chats:getChat", {
+                "userId": context.user_id,
+                "chatId": context.chat_id
+            }),
+        ))
+
         # Fire-and-forget watchlist inference (non-blocking)
         asyncio.create_task(
             _infer_watchlist(context.convex_client, context.user_id, context.message_content)
@@ -116,6 +127,16 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         if stripped.lower() == "&help" or stripped.lower().startswith("&help "):
             context.message_content = "I need help. What can you do?"
             logger.info("Detected &help prefix, rewritten to natural language help request")
+
+        # --- PHASE 3: Await date preprocessor, then run module if triggered ---
+
+        # Resolve date context before module invoke (modules may need it)
+        date_context_str = None
+        if date_task:
+            date_preprocessor_result = await date_task
+            date_context: DateContext = date_preprocessor_result.output
+            date_context_str = date_context.to_context_string()
+            logger.info(f"Date context: {date_context_str}")
 
         # Check for module triggers
         module_registry = get_module_registry()
@@ -140,6 +161,20 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                 logger.error(error_msg, exc_info=True)
                 module_response = f"ERROR: {error_msg}"
 
+        # Convert module response to user's preferred currency if needed
+        if module_response and not module_response.startswith("ERROR:"):
+            try:
+                currency_result = await context.async_convex_client.query(
+                    "profiles:getUserCurrency", {"userId": context.user_id}
+                )
+                preferred_currency = currency_result.get("preferred_currency") if currency_result else None
+
+                if preferred_currency and preferred_currency.upper() != "USD":
+                    logger.info(f"User prefers {preferred_currency}, converting module response")
+                    module_response = await convert_currency(module_response, preferred_currency)
+            except Exception as e:
+                logger.warning(f"Currency conversion failed, using original USD response: {e}")
+
         # Detect unresolved module triggers (e.g., &lens, &foo — patterns not matched by any registered module)
         interim_messages = []
         mentioned_triggers = re.findall(r'&(\w+)', context.message_content)
@@ -154,14 +189,9 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             await _send_interim_message(context, text=not_found_text)
             interim_messages.append(not_found_text)
 
-        # Fetch user and chat data in parallel (non-blocking)
-        user, chat_data = await asyncio.gather(
-            context.async_convex_client.query("users:getUser", {"userId": context.user_id}),
-            context.async_convex_client.query("chats:getChat", {
-                "userId": context.user_id,
-                "chatId": context.chat_id
-            }),
-        )
+        # --- PHASE 4: Await DB fetch results (should already be complete by now) ---
+
+        user, chat_data = await db_fetch_task
         needs_onboarding = user and not user.get("onboarding_complete")
 
         # Process Summaries (Oldest to Newest)
@@ -198,6 +228,17 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         # Create a context string that includes summaries, message history and the current message
         if module_response:
+            # Build module-specific presentation instructions if available
+            response_instructions = module_registry.get_response_instructions(module_name) if module_name else ""
+            constraints = module_registry.get_constraints_for_module(module_name) if module_name else []
+            extra_sections = ""
+            if response_instructions:
+                extra_sections += f"\n\n        MODULE-SPECIFIC FORMATTING:\n        {response_instructions}"
+            if constraints:
+                constraints_str = "\n        ".join(f"- {c}" for c in constraints)
+                extra_sections += f"\n\n        MODULE CONSTRAINTS:\n        {constraints_str}"
+            presentation_guidance = f"IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.{extra_sections}"
+
             context_str = f"""
         [LONG TERM MEMORY / SUMMARIES]
         The following are summaries of earlier conversation parts (chronological order):
@@ -215,7 +256,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         A specialized module has processed this request and returned the following response:
         {module_response}
 
-        IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.
+        {presentation_guidance}
         """
         else:
             # Build optional module-not-found section
@@ -342,6 +383,13 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         asyncio.create_task(
             _manage_chat_memory(context.async_convex_client, context.chat_id, context.user_id)
         )
+
+        # --- PROFILE WATCHER (fire-and-forget) ---
+        # For post-onboarding users, watch for profile-relevant info in each message
+        if not needs_onboarding:
+            asyncio.create_task(
+                _watch_profile(context, context.message_content)
+            )
 
         return response_messages
 
@@ -486,7 +534,8 @@ async def _manage_chat_memory(async_client: AsyncConvexClient, chat_id: str, use
                 extracted_profile.inferred_risk_appetite is not None,
                 extracted_profile.inferred_investment_knowledge is not None,
                 extracted_profile.inferred_financial_goals is not None,
-                extracted_profile.inferred_investment_thesis is not None
+                extracted_profile.inferred_investment_thesis is not None,
+                extracted_profile.preferred_currency is not None,
             ])
 
             if has_updates:
@@ -509,6 +558,8 @@ async def _manage_chat_memory(async_client: AsyncConvexClient, chat_id: str, use
                     update_data["inferred_financial_goals"] = extracted_profile.inferred_financial_goals
                 if extracted_profile.inferred_investment_thesis is not None:
                     update_data["inferred_investment_thesis"] = extracted_profile.inferred_investment_thesis
+                if extracted_profile.preferred_currency is not None:
+                    update_data["preferred_currency"] = extracted_profile.preferred_currency.upper()
 
                 await async_client.mutation("profiles:updateProfile", {
                     "user": user_id,
@@ -517,6 +568,23 @@ async def _manage_chat_memory(async_client: AsyncConvexClient, chat_id: str, use
                 logger.info(f"Updated user profile for user {user_id} with extracted data")
             else:
                 logger.info(f"No profile updates extracted for user {user_id}")
+
+            # Handle country extraction (requires country lookup)
+            if extracted_profile.country_name:
+                await _update_extracted_country(async_client, user_id, extracted_profile.country_name)
+
+            # Handle contact info extraction (update user record)
+            contact_updates = {}
+            if extracted_profile.email:
+                contact_updates["email"] = extracted_profile.email
+            if extracted_profile.phone:
+                contact_updates["phone"] = extracted_profile.phone
+            if contact_updates:
+                await async_client.mutation("users:updateUser", {
+                    "id": user_id,
+                    **contact_updates
+                })
+                logger.info(f"Updated user contact info for user {user_id}: {list(contact_updates.keys())}")
 
             # Save Summary and Archive Messages
             await async_client.mutation("messages:createSummaryAndArchive", {
@@ -532,3 +600,98 @@ async def _manage_chat_memory(async_client: AsyncConvexClient, chat_id: str, use
     except Exception as e:
         # Log but don't fail — this runs as a background task
         logger.error(f"Error in memory management for chat {chat_id}: {str(e)}", exc_info=True)
+
+
+async def _update_extracted_country(async_client: AsyncConvexClient, user_id: str, country_name: str):
+    """
+    Look up a country by name or code and update the user's profile.
+    Used by both the memory management extractor and the profile watcher.
+    """
+    try:
+        # Try by code first
+        country = await async_client.query("countries:getCountryByCode", {
+            "country_code": country_name.upper()
+        })
+
+        if not country:
+            all_countries = await async_client.query("countries:getCountries", {})
+            for c in all_countries:
+                if country_name.lower() in c["country_name"].lower():
+                    country = c
+                    break
+
+        if country:
+            await async_client.mutation("profiles:updateProfile", {
+                "user": user_id,
+                "country": country["_id"]
+            })
+            logger.info(f"Updated country for user {user_id} to {country['country_name']}")
+        else:
+            logger.warning(f"Could not find country '{country_name}' for user {user_id}")
+    except Exception as e:
+        logger.error(f"Error updating extracted country for user {user_id}: {str(e)}", exc_info=True)
+
+
+async def _watch_profile(context: ResponseContext, message: str):
+    """
+    Run the extractor on a single message to detect profile-relevant information.
+    If detected, send a follow-up suggestion message to the user (non-blocking).
+    Only runs for post-onboarding users.
+    """
+    try:
+        extractor_agent = get_extractor_agent()
+        extractor_ctx = ExtractorContext(
+            convex_client=context.async_convex_client,
+            user_id=context.user_id
+        )
+
+        result = await extractor_agent.run(
+            f"Extract user profile information from this single message. Only extract fields where the user clearly reveals personal information about themselves:\n\n{message}",
+            deps=extractor_ctx
+        )
+
+        extracted = result.output
+
+        # Check which profile-watchable fields were detected
+        suggestions = []
+        if extracted.country_name:
+            suggestions.append(f"your country to {extracted.country_name}")
+        if extracted.preferred_currency:
+            suggestions.append(f"your preferred currency to {extracted.preferred_currency.upper()}")
+        if extracted.email:
+            suggestions.append(f"your email to {extracted.email}")
+        if extracted.phone:
+            suggestions.append(f"your phone number to {extracted.phone}")
+
+        if not suggestions:
+            return
+
+        # Build the suggestion message
+        if len(suggestions) == 1:
+            suggestion_text = f"By the way, would you like me to update {suggestions[0]} on your profile?"
+        else:
+            items = ", ".join(suggestions[:-1]) + f" and {suggestions[-1]}"
+            suggestion_text = f"By the way, would you like me to update {items} on your profile?"
+
+        logger.info(f"Profile watcher detected updates for user {context.user_id}: {suggestions}")
+
+        # Store the suggestion as an assistant message
+        await context.async_convex_client.mutation("messages:createMessage", {
+            "userId": context.user_id,
+            "role": "assistant",
+            "channel": context.channel,
+            "content": suggestion_text
+        })
+
+        # Send via Telegram if applicable
+        if context.channel == "telegram" and context.telegram_id:
+            from ..clients.telegram_client import TelegramClient
+            telegram_client = TelegramClient()
+            await telegram_client.send_message(
+                chat_id=int(context.telegram_id),
+                text=suggestion_text
+            )
+            await telegram_client.close()
+
+    except Exception as e:
+        logger.error(f"Profile watcher failed for user {context.user_id}: {str(e)}", exc_info=True)

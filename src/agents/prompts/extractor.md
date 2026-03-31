@@ -41,4 +41,27 @@ FIELD DEFINITIONS:
 - Return null unless there's substantial evidence
 - If updating existing thesis, refine or expand it based on new information
 
+**country_name**
+- Evidence: User mentions moving to, living in, or being from a specific country
+- Extract the country name or ISO 3166-1 alpha-3 code
+- Example: "I recently moved to Canada" → "Canada"
+- Only extract if user clearly indicates this is where they live/reside, not just a country they mention in passing
+- Do NOT extract if user is asking about a country for informational purposes only (e.g., "what's happening in Japan's economy?")
+
+**preferred_currency**
+- Evidence: User mentions wanting to see prices in a specific currency, or mentions their local currency
+- Extract as ISO 4217 code (e.g., "USD", "CAD", "EUR", "GBP")
+- Example: "I'd like to see everything in Canadian dollars" → "CAD"
+- Only extract if user expresses a clear preference for this currency
+
+**email**
+- Evidence: User shares their email address in conversation
+- Extract the full email address
+- Example: "my email is john@example.com" → "john@example.com"
+
+**phone**
+- Evidence: User shares their phone number in conversation
+- Extract the full phone number including country code if provided
+- Example: "you can reach me at +1-555-123-4567" → "+15551234567"
+
 If existing profile has inferred values, only update them if new evidence contradicts or adds significant detail.

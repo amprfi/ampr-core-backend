@@ -66,5 +66,5 @@ def get_telegram_bot() -> Bot:
     
     return Bot(
         token=token,
-        default=DefaultBotProperties(parse_mode="Markdown")
+        default=DefaultBotProperties(parse_mode="HTML")
     )

@@ -269,15 +269,27 @@ class EventPoller:
         - Short-lived tags ("daily", "up-or-down") + endDate > 7 days → delete
         - All others + endDate > 30 days → mark historical
         """
-        inactive = self.convex.query("predictionEvents:getInactiveEvents")
-        if not inactive:
+        # Paginate through all inactive, non-historical events
+        all_inactive: list[dict] = []
+        cursor = None
+        while True:
+            result = self.convex.query(
+                "predictionEvents:getInactiveEvents",
+                {"paginationOpts": {"numItems": 500, "cursor": cursor}},
+            )
+            all_inactive.extend(result["page"])
+            if result["isDone"]:
+                break
+            cursor = result["continueCursor"]
+
+        if not all_inactive:
             logger.info("No inactive events for retention processing")
             return
 
         to_delete: list[str] = []
         to_historicise: list[str] = []
 
-        for event in inactive:
+        for event in all_inactive:
             days = _days_since_end(event.get("endDate"))
             if days is None:
                 continue

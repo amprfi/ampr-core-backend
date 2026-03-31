@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { query, mutation } from "./_generated/server";
 
 /**
@@ -21,6 +22,17 @@ export const getAllEvents = query({
   args: {},
   handler: async (ctx) => {
     return await ctx.db.query("predictionEvents").collect();
+  },
+});
+
+/**
+ * Get a prediction event by its ID.
+ * Used by the probability poller to resolve event slugs.
+ */
+export const getEvent = query({
+  args: { id: v.id("predictionEvents") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
   },
 });
 
@@ -205,15 +217,16 @@ export const deleteEvents = mutation({
 });
 
 /**
- * Get inactive, non-historical events for lifecycle processing.
+ * Get inactive, non-historical events for lifecycle processing (paginated).
  */
 export const getInactiveEvents = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
     return await ctx.db
       .query("predictionEvents")
-      .withIndex("by_active", (q) => q.eq("active", false))
-      .filter((q) => q.eq(q.field("historical"), false))
-      .collect();
+      .withIndex("by_active_historical", (q) =>
+        q.eq("active", false).eq("historical", false)
+      )
+      .paginate(args.paginationOpts);
   },
 });

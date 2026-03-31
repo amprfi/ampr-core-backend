@@ -1,12 +1,19 @@
 from pathlib import Path
-from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, Field
-from datetime import datetime, timedelta
+from datetime import datetime, date
+from calendar import monthrange
 from typing import Optional
+import httpx
+import json
 import logging
+import os
 import re
 
 logger = logging.getLogger(__name__)
+
+MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
+MODEL = "mistral-small-latest"
 
 # Regex pattern to detect date-like phrases (used for conditional execution)
 DATE_PATTERN = re.compile(
@@ -15,6 +22,8 @@ DATE_PATTERN = re.compile(
     r'monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
     re.IGNORECASE
 )
+
+PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/date_preprocessor.md").read_text()
 
 
 class DateReference(BaseModel):
@@ -49,84 +58,95 @@ class DatePreprocessorContext(BaseModel):
     pass
 
 
-agent = Agent(
-    "mistral:mistral-small-latest",
-    deps_type=DatePreprocessorContext,
-    output_type=DateContext
-)
+class _DatePreprocessorResult:
+    """Wrapper to maintain interface compatibility with pydantic-ai's RunResult."""
+    def __init__(self, output: DateContext):
+        self.output = output
 
 
-@agent.tool
-async def calculate_date_from_days_ago(ctx: RunContext[DatePreprocessorContext], days_ago: int) -> str:
-    """
-    Calculate a date N days ago from today in dd-mm-yyyy format.
-    
-    Args:
-        days_ago: Number of days ago (e.g., 30 for "30 days ago", 7 for "a week ago")
-        
-    Returns:
-        Date in dd-mm-yyyy format
-    """
-    logger.info(f"Tool called: calculate_date_from_days_ago, days_ago={days_ago}")
-    try:
-        target_date = datetime.now() - timedelta(days=days_ago)
-        date_str = target_date.strftime("%d-%m-%Y")
-        logger.info(f"Tool result: {days_ago} days ago = {date_str}")
-        return date_str
-    except Exception as e:
-        error_msg = f"Error calculating date: {str(e)}"
-        logger.error(f"Tool error: calculate_date_from_days_ago - {error_msg}")
-        return error_msg
+def _build_calendar_context(today: date) -> str:
+    """Build calendar context with quarter and month boundaries."""
+    # Quarter boundaries (Q1: Jan-Mar, Q2: Apr-Jun, Q3: Jul-Sep, Q4: Oct-Dec)
+    quarter_starts = {1: 1, 2: 4, 3: 7, 4: 10}
+    quarter_ends = {1: 3, 2: 6, 3: 9, 4: 12}
+
+    current_q = (today.month - 1) // 3 + 1
+    prev_q = current_q - 1 if current_q > 1 else 4
+    next_q = current_q + 1 if current_q < 4 else 1
+    prev_q_year = today.year if current_q > 1 else today.year - 1
+    next_q_year = today.year if current_q < 4 else today.year + 1
+
+    def q_range(q: int, year: int) -> str:
+        start = date(year, quarter_starts[q], 1)
+        end_month = quarter_ends[q]
+        end_day = monthrange(year, end_month)[1]
+        end = date(year, end_month, end_day)
+        return f"{start.strftime('%d-%m-%Y')} to {end.strftime('%d-%m-%Y')}"
+
+    # Previous, current, next month boundaries
+    prev_month = today.month - 1 if today.month > 1 else 12
+    prev_month_year = today.year if today.month > 1 else today.year - 1
+    prev_month_last_day = monthrange(prev_month_year, prev_month)[1]
+    next_month = today.month + 1 if today.month < 12 else 1
+    next_month_year = today.year if today.month < 12 else today.year + 1
+    next_month_last_day = monthrange(next_month_year, next_month)[1]
+
+    fmt = "%d-%m-%Y"
+    lines = [
+        f"Today's date: {today.strftime('%A, %B %d, %Y')}",
+        "",
+        "CALENDAR CONTEXT:",
+        f"Current quarter (Q{current_q}): {q_range(current_q, today.year)}",
+        f"Previous quarter (Q{prev_q}): {q_range(prev_q, prev_q_year)}",
+        f"Next quarter (Q{next_q}): {q_range(next_q, next_q_year)}",
+        f"Current month: {date(today.year, today.month, 1).strftime(fmt)} to {date(today.year, today.month, monthrange(today.year, today.month)[1]).strftime(fmt)}",
+        f"Previous month: {date(prev_month_year, prev_month, 1).strftime(fmt)} to {date(prev_month_year, prev_month, prev_month_last_day).strftime(fmt)}",
+        f"Next month: {date(next_month_year, next_month, 1).strftime(fmt)} to {date(next_month_year, next_month, next_month_last_day).strftime(fmt)}",
+    ]
+    return "\n".join(lines)
 
 
-@agent.tool
-async def calculate_date_from_days_ahead(ctx: RunContext[DatePreprocessorContext], days_ahead: int) -> str:
-    """
-    Calculate a date N days in the future from today in dd-mm-yyyy format.
-    
-    Args:
-        days_ahead: Number of days in the future (e.g., 30 for "in 30 days", 7 for "next week")
-        
-    Returns:
-        Date in dd-mm-yyyy format
-    """
-    logger.info(f"Tool called: calculate_date_from_days_ahead, days_ahead={days_ahead}")
-    try:
-        target_date = datetime.now() + timedelta(days=days_ahead)
-        date_str = target_date.strftime("%d-%m-%Y")
-        logger.info(f"Tool result: {days_ahead} days ahead = {date_str}")
-        return date_str
-    except Exception as e:
-        error_msg = f"Error calculating date: {str(e)}"
-        logger.error(f"Tool error: calculate_date_from_days_ahead - {error_msg}")
-        return error_msg
+class DatePreprocessorAgent:
+    """Date preprocessor using direct Mistral API calls with reasoning."""
 
+    async def run(self, message: str, deps: DatePreprocessorContext = None) -> _DatePreprocessorResult:
+        calendar_context = _build_calendar_context(date.today())
+        system_prompt = f"{calendar_context}\n\n{PROMPT_TEMPLATE}"
 
-@agent.tool
-async def get_current_date(ctx: RunContext[DatePreprocessorContext]) -> str:
-    """
-    Get today's date in dd-mm-yyyy format.
-    
-    Returns:
-        Today's date in dd-mm-yyyy format
-    """
-    logger.info("Tool called: get_current_date")
-    try:
-        date_str = datetime.now().strftime("%d-%m-%Y")
-        logger.info(f"Tool result: current date = {date_str}")
-        return date_str
-    except Exception as e:
-        error_msg = f"Error getting current date: {str(e)}"
-        logger.error(f"Tool error: get_current_date - {error_msg}")
-        return error_msg
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": message},
+        ]
 
+        body = {
+            "model": MODEL,
+            "messages": messages,
+            "reasoning_effort": "high",
+            "response_format": {"type": "json_object"},
+        }
 
-PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/date_preprocessor.md").read_text()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    MISTRAL_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {MISTRAL_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                resp.raise_for_status()
+                data = resp.json()
 
+            content = data["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            date_context = DateContext(**parsed)
+            logger.info(f"Date preprocessor resolved {len(date_context.date_references)} reference(s)")
+            return _DatePreprocessorResult(output=date_context)
 
-@agent.system_prompt
-def get_system_prompt(ctx: RunContext[DatePreprocessorContext]) -> str:
-    return PROMPT_TEMPLATE
+        except Exception as e:
+            logger.error(f"Date preprocessor error: {e}", exc_info=True)
+            return _DatePreprocessorResult(output=DateContext())
 
 
 def has_date_references(message: str) -> bool:
@@ -135,4 +155,4 @@ def has_date_references(message: str) -> bool:
 
 
 def get_date_preprocessor_agent():
-    return agent
+    return DatePreprocessorAgent()

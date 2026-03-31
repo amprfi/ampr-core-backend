@@ -15,3 +15,4 @@ class UserProfile(BaseModel):
     inferred_investment_knowledge: Optional[Literal["novice", "intermediate", "advanced"]] = None
     inferred_financial_goals: Optional[List[str]] = None
     inferred_investment_thesis: Optional[str] = None
+    preferred_currency: Optional[str] = Field(None, description="ISO 4217 currency code (e.g., USD, CAD)")

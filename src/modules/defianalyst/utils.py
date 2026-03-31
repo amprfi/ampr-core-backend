@@ -173,10 +173,22 @@ def format_comparison_summary(comparisons: List[Dict]) -> str:
     if not comparisons:
         return "No comparison data available"
 
-    first = comparisons[0]
+    # Separate successful comparisons from errors
+    successes = [c for c in comparisons if "error" not in c]
+    errors = [c for c in comparisons if "error" in c]
+
+    # If all comparisons failed, return a clear error message
+    if not successes:
+        error_lines = ["Failed to retrieve data for all requested coins:"]
+        for comp in errors:
+            name = comp.get("name", comp.get("coin_id", "Unknown"))
+            error_lines.append(f"- {name}: {comp['error']}")
+        return "\n".join(error_lines)
+
+    first = successes[0]
     lines = [f"Price comparison from {first.get('start_date')} to {first.get('end_date')}:"]
 
-    for comp in comparisons:
+    for comp in successes:
         name = comp.get("name", comp.get("coin_id", "Unknown"))
         symbol = comp.get("symbol", "").upper()
         start_price = comp.get("start_price", 0)
@@ -188,6 +200,11 @@ def format_comparison_summary(comparisons: List[Dict]) -> str:
         change_str = f"{percentage_change:+.2f}%"
 
         lines.append(f"{name} ({symbol}): {start_str} → {end_str} ({change_str})")
+
+    # Append any partial errors
+    for comp in errors:
+        name = comp.get("name", comp.get("coin_id", "Unknown"))
+        lines.append(f"{name}: data unavailable ({comp['error']})")
 
     return "\n".join(lines)
 

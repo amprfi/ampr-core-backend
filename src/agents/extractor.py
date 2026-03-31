@@ -58,6 +58,22 @@ class ExtractedProfile(BaseModel):
         None,
         description="User's overall investment philosophy or thesis synthesized from conversations"
     )
+    country_name: Optional[str] = Field(
+        None,
+        description="Country name or ISO 3166-1 alpha-3 code mentioned as user's residence (e.g., 'Canada', 'CAN')"
+    )
+    preferred_currency: Optional[str] = Field(
+        None,
+        description="ISO 4217 currency code mentioned as user's preferred currency (e.g., 'USD', 'CAD', 'EUR')"
+    )
+    email: Optional[str] = Field(
+        None,
+        description="Email address mentioned by the user"
+    )
+    phone: Optional[str] = Field(
+        None,
+        description="Phone number mentioned by the user"
+    )
 
 agent = Agent(
     "mistral:mistral-small-latest",
