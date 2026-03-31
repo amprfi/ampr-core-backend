@@ -107,6 +107,21 @@ async def get_coin_price_and_market_data(
 
         if date:
             result += f" (data from {date})"
+
+            # Also fetch current price for comparison context
+            try:
+                current_data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+                current_market_data = current_data.get("market_data", {})
+                current_price_now = current_market_data.get("current_price", {}).get("usd")
+                if current_price_now is not None:
+                    current_price_str = utils.format_price(current_price_now)
+                    result += f". Current price: {current_price_str}"
+
+                    if isinstance(price_usd, (int, float)) and price_usd > 0:
+                        pct_change = ((current_price_now - price_usd) / price_usd) * 100
+                        result += f" ({pct_change:+,.1f}% since {date})"
+            except Exception as e:
+                logger.warning(f"Failed to fetch current price for comparison: {e}")
         else:
             result += "."
 

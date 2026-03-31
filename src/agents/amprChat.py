@@ -9,6 +9,7 @@ from pydantic_ai.agent.abstract import RunOutputDataT
 from src.models.user_profile import UserProfile
 from src.utils.preprocessing import profile_to_sentences
 from src.modules.registry import get_module_registry
+from src.agents.currency_converter import convert_currency
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +219,19 @@ async def call_specialist_module(
             ctx.deps.invoked_modules.append(module_name)
 
         logger.info(f"Tool result: call_specialist_module for {module_name} succeeded")
+
+        # Convert to user's preferred currency if needed
+        try:
+            currency_result = ctx.deps.convex_client.query(
+                "profiles:getUserCurrency", {"userId": ctx.deps.user_id}
+            )
+            preferred_currency = currency_result.get("preferred_currency") if currency_result else None
+
+            if preferred_currency and preferred_currency.upper() != "USD":
+                logger.info(f"User prefers {preferred_currency}, converting module response")
+                result = await convert_currency(result, preferred_currency)
+        except Exception as e:
+            logger.warning(f"Currency conversion failed, using original USD response: {e}")
 
         # Prepend module-specific response instructions and constraints if available
         response_instructions = registry.get_response_instructions(module_name)

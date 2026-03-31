@@ -71,6 +71,21 @@ export const getUserCountry = query({
 });
 
 /**
+ * Get user's preferred currency code (lightweight query for currency conversion)
+ */
+export const getUserCurrency = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const profile = await ctx.db
+      .query("profiles")
+      .withIndex("by_user", (q) => q.eq("user", args.userId))
+      .unique();
+
+    return { preferred_currency: profile?.preferred_currency ?? null };
+  },
+});
+
+/**
  * Create a new user profile
  * 
  * Throws error if profile already exists for this user
