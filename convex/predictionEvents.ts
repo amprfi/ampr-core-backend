@@ -26,6 +26,17 @@ export const getAllEvents = query({
 });
 
 /**
+ * Get a prediction event by its ID.
+ * Used by the probability poller to resolve event slugs.
+ */
+export const getEvent = query({
+  args: { id: v.id("predictionEvents") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.id);
+  },
+});
+
+/**
  * Get a prediction event by slug
  */
 export const getEventBySlug = query({

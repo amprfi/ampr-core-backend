@@ -9,7 +9,7 @@ from datetime import datetime
 from convex import ConvexClient
 
 from .polymarket_client import PolymarketClient
-from ..base import BaseModule
+from ..base import BaseModule, NotificationTypeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,14 @@ async def _exec_get_event(polymarket_client: PolymarketClient, slug: str) -> str
             for i, market in enumerate(markets, 1):
                 group_title = market.get("groupItemTitle", "")
                 question = market.get("question", "Unknown")
-                outcome_prices = market.get("outcomePrices", [])
+                raw_prices = market.get("outcomePrices", [])
+                if isinstance(raw_prices, str):
+                    try:
+                        outcome_prices = json.loads(raw_prices)
+                    except (json.JSONDecodeError, TypeError):
+                        outcome_prices = []
+                else:
+                    outcome_prices = raw_prices if raw_prices else []
                 market_volume = market.get("volume", 0)
                 market_closed = market.get("closed", False)
                 open_interest = market.get("openInterest", 0)
@@ -319,6 +326,22 @@ class OracleModule(BaseModule):
         self.polymarket_client = PolymarketClient()
         self._convex_client_instance = convex_client
 
+    def get_notification_types(self) -> list[NotificationTypeConfig]:
+        return [
+            NotificationTypeConfig(
+                name="probability_change_24h",
+                description="24-hour probability change exceeds threshold",
+                default_enabled=True,
+                priority="medium",
+            ),
+            NotificationTypeConfig(
+                name="probability_change_7d",
+                description="7-day probability change exceeds threshold",
+                default_enabled=True,
+                priority="medium",
+            ),
+        ]
+
     def _get_convex_client(self) -> ConvexClient:
         if self._convex_client_instance:
             return self._convex_client_instance
@@ -349,6 +372,45 @@ class OracleModule(BaseModule):
             error_msg = f"Oracle error: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise Exception(error_msg)
+
+    async def register_notifications(self, user_id: str, event_id: str) -> None:
+        """
+        Create default probability alert rows (percentage_24h and percentage_7d) for a user+event.
+        Called when an event is added to the watchlist. No-op if alerts already exist.
+        """
+        if not self._convex_client:
+            logger.error("OracleModule not registered, cannot register notifications")
+            return
+
+        type_24h = self.get_notification_type_id("probability_change_24h")
+        type_7d = self.get_notification_type_id("probability_change_7d")
+
+        if not type_24h or not type_7d:
+            logger.error("Missing notification type IDs for probability_change_24h/7d, cannot register alerts")
+            return
+
+        created = self._convex_client.mutation("predictionAlerts:registerDefaultAlerts", {
+            "user": user_id,
+            "event": event_id,
+            "notification_type_24h": type_24h,
+            "notification_type_7d": type_7d,
+        })
+        logger.info(f"Registered {created} default prediction alerts for user={user_id}, event={event_id}")
+
+    async def deregister_notifications(self, user_id: str, event_id: str) -> None:
+        """
+        Clean up all prediction alerts for a user+event.
+        Called by the interest expiration job when an inferred watch expires.
+        """
+        if not self._convex_client:
+            logger.error("OracleModule not registered, cannot deregister notifications")
+            return
+
+        removed = self._convex_client.mutation("predictionAlerts:removeAlertsByUserEvent", {
+            "user": user_id,
+            "event": event_id,
+        })
+        logger.info(f"Deregistered {removed} prediction alerts for user={user_id}, event={event_id}")
 
     async def close(self):
         """Clean up resources."""

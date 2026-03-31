@@ -468,6 +468,142 @@ async def manage_price_alert(
 
 
 @agent.tool
+async def manage_prediction_alert(
+    ctx: RunContext[TalkerContext],
+    action: str,
+    event_query: str,
+    event_slug: Optional[str] = None,
+    alert_kind: Optional[str] = None,
+    threshold_pct: Optional[float] = None,
+) -> str:
+    """
+    Manage prediction market alerts for a prediction event (Oracle module).
+
+    Args:
+        action: One of "set", "remove", "list".
+            - "set": Add event to watchlist and create default alerts (24h: 5%, 7d: 10%).
+              Optionally override a specific threshold with alert_kind + threshold_pct.
+            - "remove": Remove prediction alerts for an event.
+            - "list": List the user's active prediction alerts.
+        event_query: The event title or search query to find the event.
+            For "list", pass "all" to show all alerts.
+        event_slug: Optional Polymarket event slug for exact lookup (e.g., "fed-decision-in-july-181").
+            Preferred over event_query when available from a prior Oracle response.
+            Always pass the slug if the Oracle module already resolved the event.
+        alert_kind: Optional for "set". One of:
+            - "percentage_24h": Override the 24h probability change threshold.
+            - "percentage_7d": Override the 7d probability change threshold.
+            If omitted, both default thresholds are created automatically.
+        threshold_pct: Optional for "set". Custom threshold as a decimal (e.g., 0.05 for 5%).
+            Only used when alert_kind is also provided.
+
+    Returns:
+        Status message describing the result.
+    """
+    logger.info(f"Tool called: manage_prediction_alert action={action}, event={event_query}, slug={event_slug}")
+    convex = ctx.deps.convex_client
+    user_id = ctx.deps.user_id
+
+    try:
+        if action == "list":
+            alerts = convex.query("predictionAlerts:getUserAlerts", {"user": user_id})
+            if not alerts:
+                return "You have no active prediction alerts."
+
+            lines = []
+            for alert in alerts:
+                event = convex.query("predictionEvents:getEvent", {"id": alert["event"]}) if alert.get("event") else None
+                label = event.get("title", "Unknown") if event else "Default"
+
+                period = "24h" if alert["alert_kind"] == "percentage_24h" else "7d"
+                threshold = alert.get("threshold_pct", 0)
+                lines.append(f"- {label}: {period} probability change exceeds {threshold:.0%}")
+
+            return "Your active prediction alerts:\n" + "\n".join(lines)
+
+        # Resolve event: prefer slug lookup, fall back to search
+        event = None
+        if event_slug:
+            event = convex.query("predictionEvents:getEventBySlug", {"slug": event_slug})
+
+        if not event:
+            events = convex.query("predictionEvents:searchEvents", {"query": event_query, "limit": 1})
+            if events:
+                event = events[0]
+
+        if not event:
+            return f"ERROR: No prediction event found matching '{event_query}'."
+
+        event_id = event["_id"]
+
+        if action == "remove":
+            removed = convex.mutation("predictionAlerts:removeAlertsByUserEvent", {
+                "user": user_id,
+                "event": event_id,
+            })
+            return f"Removed {removed} prediction alert(s) for '{event.get('title', event_query)}'."
+
+        elif action == "set":
+            # Add event to watchlistEvents as stated watch
+            convex.mutation("watchlistEvents:addToWatchlist", {
+                "user": user_id,
+                "event": event_id,
+            })
+
+            # Register default alerts (both 24h and 7d) via the oracle module
+            registry = get_module_registry()
+            oracle_module = registry.get_module("oracle")
+            if oracle_module and hasattr(oracle_module, "register_notifications"):
+                await oracle_module.register_notifications(user_id, event_id)
+
+            # If custom alert_kind/threshold provided, override that specific default
+            if alert_kind and threshold_pct is not None:
+                # Normalize: LLM may pass 5 instead of 0.05 for "5%"
+                if threshold_pct >= 1:
+                    threshold_pct = threshold_pct / 100
+                module = convex.query("notifications:getModuleByName", {"name": "oracle"})
+                if not module:
+                    return "ERROR: Oracle module not registered."
+
+                type_name = "probability_change_24h" if alert_kind == "percentage_24h" else "probability_change_7d"
+                notif_type = convex.query("notifications:getNotificationTypeByName", {
+                    "module": module["_id"],
+                    "name": type_name,
+                })
+                if not notif_type:
+                    return f"ERROR: Notification type '{type_name}' not registered."
+
+                convex.mutation("predictionAlerts:setPercentageThreshold", {
+                    "user": user_id,
+                    "event": event_id,
+                    "alert_kind": alert_kind,
+                    "notification_type": notif_type["_id"],
+                    "threshold_pct": threshold_pct,
+                })
+
+                period = "24-hour" if alert_kind == "percentage_24h" else "7-day"
+                return (
+                    f"Alert set for '{event.get('title', event_query)}': "
+                    f"{period} probability change threshold set to {threshold_pct:.0%}. "
+                    f"Default alert also created for the other timeframe."
+                )
+
+            title = event.get("title", event_query)
+            return (
+                f"Alerts set for '{title}': you'll be notified when any market's "
+                f"probability shifts by 5%+ in 24 hours or 10%+ in 7 days."
+            )
+
+        else:
+            return f"ERROR: Unknown action '{action}'. Use 'set', 'remove', or 'list'."
+
+    except Exception as e:
+        error_msg = f"Error managing prediction alert: {str(e)}"
+        logger.error(f"Tool error: manage_prediction_alert - {error_msg}")
+        return f"ERROR: {error_msg}"
+
+
+@agent.tool
 async def update_user_profile(
     ctx: RunContext[TalkerContext],
     country_name: Optional[str] = None,

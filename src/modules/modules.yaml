@@ -42,7 +42,6 @@ modules:
     enabled: true
     description: "Prediction markets specialist powered by Polymarket data"
     constraints:
-      - "Does NOT support notifications or alerts — do not offer to set notifications for prediction market events"
       - "No support for realtime tracking"
     intents:
       - "Probability or likelihood of a future event (elections, rate decisions, economic outcomes)"
@@ -50,12 +49,22 @@ modules:
       - "Will X happen? questions about future economic, political, or financial events"
       - "Interest rate forecasts (e.g., Fed, ECB rate decisions)"
       - "Macro-economic predictions and event probabilities"
+      - "Prediction alerts or notifications for a prediction event (e.g., notify me if Bitcoin $100k probability changes significantly)"
     response_instructions: |
       Lead with the probability and market consensus — state what the market predicts first.
       Include price movement trends (1D/1W/1M) when available to show momentum.
       Do not emphasize volume or open interest unless the user specifically asked.
       Frame probabilities as the market's prediction, not as fact.
       Keep it to 2-3 sentences max.
+    notification_types:
+      - name: "probability_change_24h"
+        description: "24-hour probability change exceeds threshold"
+        default_enabled: true
+        priority: "medium"
+      - name: "probability_change_7d"
+        description: "7-day probability change exceeds threshold"
+        default_enabled: true
+        priority: "medium"
 
   - name: "lens"
     trigger: "&lens"

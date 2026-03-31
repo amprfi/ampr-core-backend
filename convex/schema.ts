@@ -10,6 +10,8 @@ import { countries } from "./tables/countries";
 import { predictionEvents } from "./tables/predictionEvents";
 import { priceFeedMappings } from "./tables/priceFeedMappings";
 import { priceAlerts } from "./tables/priceAlerts";
+import { watchlistEvents } from "./tables/watchlistEvents";
+import { predictionAlerts } from "./tables/predictionAlerts";
 import { lenses, lensDocuments, lensChunks } from "./tables/lenses";
 
 export default defineSchema({
@@ -28,6 +30,8 @@ export default defineSchema({
   predictionEvents,
   priceFeedMappings,
   priceAlerts,
+  watchlistEvents,
+  predictionAlerts,
   lenses,
   lensDocuments,
   lensChunks,
