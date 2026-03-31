@@ -93,7 +93,6 @@ MODULE ATTRIBUTION:
 - Don't repeat the attribution for follow-up details from the same module call
 
 RESPONSE FORMAT:
-- Return your response as a list of messages
-- You can break up longer responses into multiple messages for a more natural conversation flow
-- Example: ["Here's what I found.", "Bitcoin is currently trading at $50,000."]
-- Each string in the list will be sent as a separate message to the user
+- Return your response as plain text (not JSON, not a list)
+- Use paragraph breaks (double newlines) to separate distinct thoughts — they will be sent as separate messages automatically
+- Keep responses concise and conversational
