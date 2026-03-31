@@ -12,6 +12,25 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_coin_id(client: CoinGeckoClient, coin_id: str) -> Optional[str]:
+    """Search CoinGecko coins list to find the correct ID for a given coin name/ID."""
+    try:
+        coins_list = await client.get_coins_list()
+        query = coin_id.lower()
+        for coin in coins_list:
+            cid = coin.get("id", "").lower()
+            name = coin.get("name", "").lower()
+            symbol = coin.get("symbol", "").lower()
+            if query == cid or query == name or query == symbol:
+                resolved = coin.get("id")
+                if resolved and resolved != coin_id:
+                    logger.info(f"Resolved coin ID '{coin_id}' -> '{resolved}'")
+                return resolved
+    except Exception as e:
+        logger.warning(f"Failed to resolve coin ID '{coin_id}': {e}")
+    return None
+
+
 class DeFiAnalystContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     coingecko_client: CoinGeckoClient
@@ -42,10 +61,24 @@ async def get_coin_price_and_market_data(
     logger.info(f"Tool called: get_coin_price_and_market_data for {coin_id}, date={date}")
 
     try:
-        if date:
-            data = await ctx.deps.coingecko_client.get_coin_history(coin_id, date)
-        else:
-            data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+        try:
+            if date:
+                data = await ctx.deps.coingecko_client.get_coin_history(coin_id, date)
+            else:
+                data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+        except Exception as e:
+            if "404" in str(e):
+                resolved = await _resolve_coin_id(ctx.deps.coingecko_client, coin_id)
+                if resolved and resolved != coin_id:
+                    coin_id = resolved
+                    if date:
+                        data = await ctx.deps.coingecko_client.get_coin_history(coin_id, date)
+                    else:
+                        data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+                else:
+                    raise
+            else:
+                raise
 
         market_data = data.get("market_data", {})
         current_price = market_data.get("current_price", {})
@@ -55,6 +88,8 @@ async def get_coin_price_and_market_data(
         price_usd = current_price.get("usd", "N/A")
         mcap_usd = market_cap.get("usd", "N/A")
         volume_usd = total_volume.get("usd", "N/A")
+        circulating_supply = market_data.get("circulating_supply")
+        total_supply = market_data.get("total_supply")
 
         coin_name = data.get("name", coin_id)
         coin_symbol = data.get("symbol", "").upper()
@@ -64,6 +99,11 @@ async def get_coin_price_and_market_data(
         volume_str = f"${volume_usd:,.0f}" if isinstance(volume_usd, (int, float)) else str(volume_usd)
 
         result = f"{coin_name} ({coin_symbol}) is trading at {price_str} with a market cap of {mcap_str} and 24h volume of {volume_str}"
+
+        if circulating_supply is not None:
+            result += f", circulating supply: {circulating_supply:,.0f}"
+        if total_supply is not None:
+            result += f", total supply: {total_supply:,.0f}"
 
         if date:
             result += f" (data from {date})"
@@ -155,16 +195,16 @@ async def get_top_performing_coins(
     timeframe: str = "7d",
     top_n: int = 5,
     direction: str = "gainers",
-    top_coins: str = "1000"
+    top_coins: str = "300"
 ) -> str:
     """
     Get top performing (gainers or losers) cryptocurrencies by timeframe.
 
     Args:
-        timeframe: Time period (1h, 24h, 7d, 14d, 30d, 60d, 1y)
+        timeframe: Time period (1h, 24h, 7d, 14d, 30d, 1y)
         top_n: Number of results to display (default 5, max 30)
         direction: "gainers" for best performers, "losers" for worst
-        top_coins: Market cap scope to search within (300, 500, 1000, all). Default: 500
+        top_coins: Market cap scope to search within (300, 500, 1000, all). Default: 300
 
     Returns:
         Formatted string with coin rankings and performance data
@@ -173,7 +213,7 @@ async def get_top_performing_coins(
 
     try:
         # Validate timeframe
-        valid_timeframes = ["1h", "24h", "7d", "14d", "30d", "60d", "1y"]
+        valid_timeframes = ["1h", "24h", "7d", "14d", "30d", "1y"]
         if timeframe not in valid_timeframes:
             return f"Invalid timeframe '{timeframe}'. Valid options: {', '.join(valid_timeframes)}"
 
@@ -186,7 +226,6 @@ async def get_top_performing_coins(
         if top_n < 1 or top_n > 30:
             return "Invalid top_n. Must be between 1 and 30."
 
-        # Fetch top gainers and losers using Pro API endpoint
         data = await ctx.deps.coingecko_client.get_top_gainers_losers(
             vs_currency="usd",
             duration=timeframe,
@@ -210,11 +249,21 @@ async def get_top_performing_coins(
         # Format response as ordered list with percentage changes
         lines = [f"Top {top_n} {direction} over {timeframe}:"]
 
+        timeframe_to_field = {
+            "1h": "usd_1h_change",
+            "24h": "usd_24h_change",
+            "7d": "usd_7d_change",
+            "14d": "usd_14d_change",
+            "30d": "usd_30d_change",
+            "1y": "usd_1y_change",
+        }
+        change_field = timeframe_to_field.get(timeframe, "usd_24h_change")
+
         for i, coin in enumerate(selected_coins, 1):
             name = coin.get("name", "Unknown")
             symbol = coin.get("symbol", "").upper()
-            price = coin.get("price", coin.get("current_price", 0))
-            change = coin.get("price_change_percentage", 0)
+            price = coin.get("usd", coin.get("price", coin.get("current_price", 0)))
+            change = coin.get(change_field, coin.get("usd_24h_change", 0)) or 0
             market_cap_rank = coin.get("market_cap_rank", "N/A")
 
             price_str = utils.format_price(price)
@@ -228,10 +277,6 @@ async def get_top_performing_coins(
         logger.info(f"Tool result: Successfully retrieved top {top_n} {direction} for {timeframe}")
         return result
 
-    except NotImplementedError:
-        error_msg = "Pro API required for top_gainers_losers endpoint. Upgrade CoinGecko API plan to use this feature."
-        logger.warning(f"Tool error: get_top_performing_coins - {error_msg}")
-        return error_msg
     except Exception as e:
         error_msg = f"Failed to retrieve top performing coins: {str(e)}"
         logger.error(f"Tool error: get_top_performing_coins - {error_msg}")
@@ -274,10 +319,24 @@ async def compare_coin_performance(
         for coin_id in coin_id_list:
             try:
                 # Get start date snapshot
-                start_data = await ctx.deps.coingecko_client.get_coin_history(
-                    coin_id=coin_id,
-                    date=start_date
-                )
+                try:
+                    start_data = await ctx.deps.coingecko_client.get_coin_history(
+                        coin_id=coin_id,
+                        date=start_date
+                    )
+                except Exception as e:
+                    if "404" in str(e):
+                        resolved = await _resolve_coin_id(ctx.deps.coingecko_client, coin_id)
+                        if resolved and resolved != coin_id:
+                            coin_id = resolved
+                            start_data = await ctx.deps.coingecko_client.get_coin_history(
+                                coin_id=coin_id,
+                                date=start_date
+                            )
+                        else:
+                            raise
+                    else:
+                        raise
 
                 start_market_data = start_data.get("market_data", {})
                 start_price = start_market_data.get("current_price", {}).get("usd")
@@ -334,7 +393,9 @@ async def compare_coin_performance(
         # Format the comparison
         result = utils.format_comparison_summary(comparisons)
 
-        logger.info(f"Tool result: Successfully compared {len(comparisons)} coins")
+        successes = sum(1 for c in comparisons if "error" not in c)
+        failures = sum(1 for c in comparisons if "error" in c)
+        logger.info(f"Tool result: Compared {len(comparisons)} coins ({successes} succeeded, {failures} failed)")
         return result
 
     except Exception as e:
@@ -346,7 +407,7 @@ async def compare_coin_performance(
 @agent.tool
 async def get_coins_by_market_cap(
     ctx: RunContext[DeFiAnalystContext],
-    top_n: int = 10,
+    top_n: int = 5,
     vs_currency: str = "usd"
 ) -> str:
     """
@@ -410,9 +471,71 @@ async def get_coins_by_market_cap(
 
 
 @agent.tool
+async def get_coins_by_volume(
+    ctx: RunContext[DeFiAnalystContext],
+    top_n: int = 5,
+    vs_currency: str = "usd"
+) -> str:
+    """
+    Get top cryptocurrencies ranked by 24-hour trading volume.
+
+    Args:
+        top_n: Number of results to return (default 5, max 20)
+        vs_currency: Target currency (default "usd")
+
+    Returns:
+        Formatted ranking with coin names, symbols, 24h volumes, and prices
+    """
+    logger.info(f"Tool called: get_coins_by_volume, n={top_n}, currency={vs_currency}")
+
+    try:
+        if top_n < 3 or top_n > 20:
+            return "Invalid top_n. Must be between 3 and 20."
+
+        coins = await ctx.deps.coingecko_client.get_coins_markets(
+            vs_currency=vs_currency,
+            order="volume_desc",
+            per_page=top_n,
+            page=1
+        )
+
+        coins = utils.filter_by_min_volume(coins, min_volume=50000)
+
+        if not coins:
+            return "No coins found matching criteria"
+
+        top_coins = coins[:top_n]
+
+        lines = [f"Top {len(top_coins)} cryptocurrencies by 24h trading volume:"]
+
+        for i, coin in enumerate(top_coins, 1):
+            name = coin.get("name", "Unknown")
+            symbol = coin.get("symbol", "").upper()
+            price = coin.get("current_price", 0)
+            volume = coin.get("total_volume", 0)
+            rank = coin.get("market_cap_rank", "N/A")
+
+            price_str = utils.format_price(price)
+            volume_str = f"${volume:,.0f}"
+            rank_str = f"#{rank}" if rank != "N/A" else "N/A"
+
+            lines.append(f"{i}. {name} ({symbol}): {price_str}, 24h Volume: {volume_str}, MCap Rank: {rank_str}")
+
+        result = "\n".join(lines)
+
+        logger.info(f"Tool result: Successfully retrieved top {len(top_coins)} coins by volume")
+        return result
+
+    except Exception as e:
+        error_msg = f"Failed to retrieve coins by volume: {str(e)}"
+        logger.error(f"Tool error: get_coins_by_volume - {error_msg}")
+        return error_msg
+
+
+@agent.tool
 async def get_coins_by_fdv(
     ctx: RunContext[DeFiAnalystContext],
-    top_n: int = 10,
+    top_n: int = 5,
     vs_currency: str = "usd"
 ) -> str:
     """
@@ -499,7 +622,18 @@ async def get_coin_ath_atl(
     logger.info(f"Tool called: get_coin_ath_atl for {coin_id}, currency={vs_currency}")
 
     try:
-        data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+        try:
+            data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+        except Exception as e:
+            if "404" in str(e):
+                resolved = await _resolve_coin_id(ctx.deps.coingecko_client, coin_id)
+                if resolved and resolved != coin_id:
+                    coin_id = resolved
+                    data = await ctx.deps.coingecko_client.get_current_price(coin_id)
+                else:
+                    raise
+            else:
+                raise
 
         market_data = data.get("market_data", {})
 

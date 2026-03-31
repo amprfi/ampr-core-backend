@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { query, mutation } from "./_generated/server";
 
 /**
@@ -205,16 +206,16 @@ export const deleteEvents = mutation({
 });
 
 /**
- * Get inactive, non-historical events for lifecycle processing.
+ * Get inactive, non-historical events for lifecycle processing (paginated).
  */
 export const getInactiveEvents = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
     return await ctx.db
       .query("predictionEvents")
       .withIndex("by_active_historical", (q) =>
         q.eq("active", false).eq("historical", false)
       )
-      .collect();
+      .paginate(args.paginationOpts);
   },
 });
