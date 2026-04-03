@@ -14,7 +14,7 @@ class OnboardingContext(BaseModel):
     telegram_id: Optional[str] = None
 
 agent = Agent(
-    "mistral:mistral-large-latest",
+    "mistral:mistral-medium-latest",
     deps_type=OnboardingContext,
     output_type=str
 )
@@ -105,14 +105,10 @@ async def set_user_country(
     logger.info(f"Resolved country: id={country['_id']}, code={country['country_code']}, name={country['country_name']}")
 
     # Upsert the profile with the country
-    updated_profile = ctx.deps.convex_client.mutation("profiles:updateProfile", {
+    ctx.deps.convex_client.mutation("profiles:updateProfile", {
         "user": ctx.deps.user_id,
         "country": country["_id"]
     })
-
-    # Verify the write persisted
-    if not updated_profile or updated_profile.get("country") != country["_id"]:
-        raise RuntimeError(f"Country update did not persist for user {ctx.deps.user_id}")
 
     currency = country.get("currency")
     if currency:
@@ -131,13 +127,10 @@ async def set_user_currency(
     logger.info(f"Tool called: set_user_currency for user_id={ctx.deps.user_id}, currency_code={currency_code}")
     code = currency_code.upper().strip()
 
-    updated_profile = ctx.deps.convex_client.mutation("profiles:updateProfile", {
+    ctx.deps.convex_client.mutation("profiles:updateProfile", {
         "user": ctx.deps.user_id,
         "preferred_currency": code
     })
-
-    if not updated_profile or updated_profile.get("preferred_currency") != code:
-        raise RuntimeError(f"Currency update did not persist for user {ctx.deps.user_id}")
 
     return f"Preferred currency set to {code}"
 

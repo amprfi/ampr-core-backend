@@ -24,7 +24,7 @@ class TalkerContext(BaseModel):
     telegram_id: str | None = None
 
 agent = Agent(
-    "mistral:mistral-large-latest",
+    "mistral:mistral-medium-latest",
     deps_type=TalkerContext,
     output_type=str
 )
