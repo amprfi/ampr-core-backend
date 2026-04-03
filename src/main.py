@@ -18,6 +18,7 @@ from .api import watchlist
 from .api import assets
 from .api import lenses
 from .api import oracle
+from .api import diagnostics
 from .clients.convex_client import get_client
 from .clients.async_convex_client import get_async_client
 from .notifications.queue_processor import get_queue_processor
@@ -120,6 +121,8 @@ fast_api.include_router(assets.router, prefix="/api")
 fast_api.include_router(lenses.router, prefix="/api")
 
 fast_api.include_router(oracle.router, prefix="/api")
+
+fast_api.include_router(diagnostics.router, prefix="/api")
 
 @fast_api.get("/")
 async def root():

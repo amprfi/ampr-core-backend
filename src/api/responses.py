@@ -284,10 +284,12 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         {module_not_found_section}"""
 
         # Get the agent response with enhanced context (retry on transient LLM errors)
+        import time
         max_retries = 3
         talker_context = None  # Track for module attribution
         for attempt in range(max_retries):
             try:
+                agent_start = time.monotonic()
                 if needs_onboarding:
                     logger.info(f"User {context.user_id} needs onboarding, using onboarding agent")
                     onboarding_agent = get_onboarding_agent()
@@ -315,8 +317,12 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                         context_str,
                         deps=talker_context,
                     )
+                agent_elapsed = round(time.monotonic() - agent_start, 2)
+                logger.info(f"Agent run completed in {agent_elapsed}s (attempt {attempt + 1})")
                 break  # Success, exit retry loop
             except Exception as agent_err:
+                agent_elapsed = round(time.monotonic() - agent_start, 2)
+                logger.warning(f"Agent run failed after {agent_elapsed}s (attempt {attempt + 1}): {agent_err}")
                 err_str = str(agent_err).lower()
                 is_transient = "503" in err_str or "overloaded" in err_str or "rate" in err_str
                 if is_transient and attempt < max_retries - 1:

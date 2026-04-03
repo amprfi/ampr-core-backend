@@ -29,12 +29,14 @@ Example response format:
 }
 """
 
+import asyncio
 import os
 import logging
+import time
 import traceback
 import uuid
 import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
 from fastapi import APIRouter, Request, HTTPException, status, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
@@ -56,6 +58,24 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 # Security scheme for bearer token
 security = HTTPBearer()
+
+# Telegram update_id deduplication
+_seen_update_ids: Dict[int, float] = {}
+_SEEN_TTL = 300  # 5 minutes
+
+
+def _is_duplicate_update(update_id: int) -> bool:
+    """Check if we've already processed this update_id, and prune stale entries."""
+    now = time.monotonic()
+    # Prune entries older than TTL
+    stale = [uid for uid, ts in _seen_update_ids.items() if now - ts > _SEEN_TTL]
+    for uid in stale:
+        del _seen_update_ids[uid]
+
+    if update_id in _seen_update_ids:
+        return True
+    _seen_update_ids[update_id] = now
+    return False
 
 class WebhookPayload(BaseModel):
     """Base model for webhook payloads"""
@@ -577,19 +597,14 @@ async def handle_telegram_webhook(request: Request):
     """
     Handle incoming updates from Telegram via webhook.
     
-    Flow:
-    1. Verify webhook secret
-    2. Parse Telegram update
-    3. Check if user shared contact (first time) → link account
-    4. Check if user exists (by telegram_id or phone)
-    5. Process message through standard pipeline
-    6. Response sent via Telegram (in responses.py)
+    Returns 200 immediately to prevent Telegram retries, then processes
+    the message in a background task. Deduplicates by update_id.
     
     Args:
         request: The incoming webhook request from Telegram
         
     Returns:
-        dict: Success response
+        dict: Success response (returned immediately)
     """
     logger.info("Received Telegram webhook update")
     
@@ -601,32 +616,45 @@ async def handle_telegram_webhook(request: Request):
             detail="Invalid secret token"
         )
     
+    # Parse update eagerly so we can deduplicate before spawning background work
+    data = await request.json()
+    logger.info(f"Telegram update data: {data}")
+    update = TelegramUpdate.model_validate(data)
+
+    # Deduplicate retries from Telegram
+    if _is_duplicate_update(update.update_id):
+        logger.info(f"Skipping duplicate Telegram update_id {update.update_id}")
+        return {"status": "ok"}
+
+    # Return 200 immediately; process in background
+    asyncio.create_task(_process_telegram_update(update))
+    return {"status": "ok"}
+
+
+async def _process_telegram_update(update: TelegramUpdate):
+    """Background processing of a Telegram update."""
     telegram_id = None
     try:
-        # Parse update
-        data = await request.json()
-        logger.info(f"Telegram update data: {data}")
-        update = TelegramUpdate.model_validate(data)
-        
         # Get Convex client
         convex_client = get_client()
         
         # Handle callback queries (inline keyboard button clicks)
         if update.callback_query:
             logger.info(f"Callback query detected: {update.callback_query}")
-            return await _handle_callback_query(update.callback_query, convex_client)
+            await _handle_callback_query(update.callback_query, convex_client)
+            return
         
         # Only handle text messages for now
         if not update.message:
             logger.info(f"Ignoring non-message update. Update type: message={update.message}, callback_query={update.callback_query}")
-            return {"status": "ok"}
+            return
         
         message: TelegramMessage = update.message
         
         # Ensure from_user exists
         if not message.from_user:
             logger.error("Message missing from_user information")
-            return {"status": "ok"}
+            return
         
         telegram_id = str(message.from_user.id)
         message_text = message.text or ""
@@ -638,12 +666,12 @@ async def handle_telegram_webhook(request: Request):
         if message.contact:
             logger.info(f"Contact detected! Processing contact sharing for user {telegram_id}")
             await _handle_contact_sharing(convex_client, message.contact, telegram_id)
-            return {"status": "ok", "message": "Contact linked"}
+            return
         
         # Ensure message has text
         if not message.text:
             logger.info("Ignoring non-text, non-contact message")
-            return {"status": "ok"}
+            return
         
         # Look up user by Telegram ID
         user = convex_client.query("users:getUserByTelegramId", {"telegram_id": telegram_id})
@@ -683,7 +711,7 @@ async def handle_telegram_webhook(request: Request):
                         text="✅ Your account has been linked! You can now chat with me."
                     )
                     await telegram_client.close()
-                    return {"status": "ok", "message": "Account linked"}
+                    return
                 else:
                     from ..clients.telegram_client import TelegramClient
                     telegram_client = TelegramClient()
@@ -693,12 +721,12 @@ async def handle_telegram_webhook(request: Request):
                     )
                     await telegram_client.close()
                     await _show_user_options(telegram_id)
-                    return {"status": "ok", "message": "Account not found"}
+                    return
             
             # Show inline keyboard with options
             logger.info(f"Telegram user {telegram_id} not found, showing options")
             await _show_user_options(telegram_id)
-            return {"status": "ok", "message": "Options shown"}
+            return
         
         user_id = user["_id"]
         logger.info(f"Found linked user: {user_id}")
@@ -720,12 +748,9 @@ async def handle_telegram_webhook(request: Request):
         await generate_ai_response(response_context)
         logger.info(f"Successfully processed Telegram message from {telegram_id}")
         
-        return {"status": "ok"}
-        
     except Exception as e:
         logger.error(f"Error processing Telegram webhook: {str(e)}", exc_info=True)
-        # Always return 200 to Telegram to prevent retry storms.
-        # Send a friendly error message to the user instead.
+        # Send a friendly error message to the user
         try:
             if telegram_id:
                 from ..clients.telegram_client import TelegramClient
@@ -737,7 +762,6 @@ async def handle_telegram_webhook(request: Request):
                 await telegram_client.close()
         except Exception as notify_err:
             logger.error(f"Failed to send error notification to user: {notify_err}")
-        return {"status": "ok"}
 
 
 async def _handle_contact_sharing(convex_client, contact: Contact, telegram_id: str):
