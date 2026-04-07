@@ -414,6 +414,20 @@ async def manage_price_alert(
                 if current_price is None:
                     return f"ERROR: No current price available for {asset.get('name', asset_name)}."
 
+                label = f"{asset.get('name', '')} ({asset.get('ticker', '')})"
+                formatted_price = f"${current_price:,.2f}"
+
+                if direction == "above" and current_price >= target_price:
+                    return (
+                        f"{label} is already above ${target_price:,.2f} "
+                        f"(currently {formatted_price}). No alert was set."
+                    )
+                if direction == "below" and current_price <= target_price:
+                    return (
+                        f"{label} is already below ${target_price:,.2f} "
+                        f"(currently {formatted_price}). No alert was set."
+                    )
+
                 type_name = "price_threshold"
                 notif_type = convex.query("notifications:getNotificationTypeByName", {
                     "module": module["_id"],
@@ -431,8 +445,7 @@ async def manage_price_alert(
                     "current_price": current_price,
                 })
 
-                label = f"{asset.get('name', '')} ({asset.get('ticker', '')})"
-                return f"Price alert set: you'll be notified when {label} goes {direction} ${target_price}."
+                return f"Price alert set: you'll be notified when {label} goes {direction} ${target_price:,.2f}."
 
             else:
                 if threshold_pct is None:
