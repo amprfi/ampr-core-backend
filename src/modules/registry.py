@@ -2,8 +2,11 @@ import re
 import yaml
 import logging
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import TYPE_CHECKING, Optional, Dict, List
 from importlib import import_module
+
+if TYPE_CHECKING:
+    from .remote_proxy import RemoteModuleProxy
 
 from .base import ModuleInterface
 
@@ -51,6 +54,7 @@ class ModuleRegistry:
                     intents=module_config.get('intents', []),
                     notification_types=module_config.get('notification_types', []),
                     response_instructions=module_config.get('response_instructions', ''),
+                    service_url=module_config.get('service_url'),
                 )
 
             logger.info(f"Loaded {len(self.modules)} module(s) from registry")
@@ -69,6 +73,7 @@ class ModuleRegistry:
         intents: List[str] = None,
         notification_types: List[Dict] = None,
         response_instructions: str = "",
+        service_url: Optional[str] = None,
     ):
         """
         Register a single module.
@@ -83,14 +88,30 @@ class ModuleRegistry:
             response_instructions: Instructions for amprChat on how to present this module's data
         """
         try:
-            module = import_module(f"{path}.agent")
+            # If service_url is provided, create a RemoteModuleProxy instead of importing
+            if service_url:
+                if path:
+                    logger.warning(
+                        f"Module {name} has both 'service_url' and 'path' defined. "
+                        "Using 'service_url' (remote dispatch)."
+                    )
+                from .remote_proxy import RemoteModuleProxy
+                from .transport import get_http_transport
+                instance = RemoteModuleProxy(
+                    name=name,
+                    trigger=trigger,
+                    service_url=service_url,
+                    transport=get_http_transport(),
+                )
+            else:
+                module = import_module(f"{path}.agent")
 
-            factory_func = getattr(module, f"get_{name}_module", None)
-            if not factory_func:
-                logger.error(f"Module {name} missing factory function: get_{name}_module")
-                return
+                factory_func = getattr(module, f"get_{name}_module", None)
+                if not factory_func:
+                    logger.error(f"Module {name} missing factory function: get_{name}_module")
+                    return
 
-            instance = factory_func()
+                instance = factory_func()
 
             self.modules[name] = instance
             self.triggers[trigger] = name
@@ -100,9 +121,13 @@ class ModuleRegistry:
                 "trigger": trigger,
                 "notification_types": notification_types or [],
                 "response_instructions": response_instructions,
+                "service_url": service_url,
             }
 
-            logger.info(f"Registered module: {name} with trigger: {trigger}")
+            if service_url:
+                logger.info(f"Registered remote module: {name} with trigger: {trigger} (service_url: {service_url})")
+            else:
+                logger.info(f"Registered module: {name} with trigger: {trigger}")
 
         except Exception as e:
             logger.error(f"Failed to register module {name}: {str(e)}", exc_info=True)
@@ -136,7 +161,24 @@ class ModuleRegistry:
         """
         return self.modules.get(name)
 
-    async def invoke_module(self, name: str, message: str, date_context: Optional[str] = None) -> str:
+    def get_remote_modules(self) -> Dict[str, "RemoteModuleProxy"]:
+        """
+        Return all registered modules that are remote proxies.
+
+        Used by main.py during lifespan startup to call POST /register on
+        each remote module and start retry tasks for any that are unavailable.
+
+        Returns:
+            Dict of module name -> RemoteModuleProxy for all remote modules.
+        """
+        from .remote_proxy import RemoteModuleProxy
+        return {
+            name: module
+            for name, module in self.modules.items()
+            if isinstance(module, RemoteModuleProxy)
+        }
+
+    async def invoke_module(self, name: str, message: str, date_context: Optional[str] = None, user_id: Optional[str] = None) -> str:
         """
         Invoke a module by name with the given message.
 
@@ -144,6 +186,7 @@ class ModuleRegistry:
             name: Module name
             message: User message to process
             date_context: Optional resolved date context from preprocessor
+            user_id: Optional core Convex user_id to forward to the module.
 
         Returns:
             Module response
@@ -156,7 +199,7 @@ class ModuleRegistry:
             raise Exception(f"Module '{name}' not found in registry")
 
         logger.info(f"Invoking module: {name}")
-        return await module.invoke(message, date_context=date_context)
+        return await module.invoke(message, date_context=date_context, user_id=user_id)
 
     def list_modules(self) -> List[Dict[str, str]]:
         """

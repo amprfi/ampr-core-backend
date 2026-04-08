@@ -46,10 +46,6 @@ Ampersand is a complete financial portal combining a web3 wallet, intelligent AI
 - **LLM Provider**: Mistral (primary)
 - **Communications**: Telegram + WhatsApp
 
-### Frontend
-- **Framework**: Svelte/SvelteKit
-- **Type**: Progressive Web Application (PWA)
-
 ### Infrastructure
 - **Deployment**: Railway
 - **Environment Management**: Poetry virtual environment

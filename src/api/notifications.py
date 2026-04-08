@@ -4,6 +4,7 @@ Notification API endpoints for testing and management.
 Provides endpoints for:
 - Manually triggering test notifications
 - Managing notification preferences
+- Module callback endpoint for remote modules to send notifications
 """
 
 import logging
@@ -173,6 +174,105 @@ async def list_notification_types(module_id: str):
         
     except Exception as e:
         logger.error(f"Error listing notification types: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
+class ModuleSendRequest(BaseModel):
+    """Request body for module-send notification callback.
+
+    Note: user_id must be the Convex document _id from the core users table
+    (not an email, external ID, or other identifier). Remote modules receive
+    this value in the /invoke payload and should pass it through unchanged.
+    """
+    user_id: str
+    module_name: str
+    notification_type_name: str
+    content: str
+    asset_ref: Optional[str] = None
+
+class ModuleSendResponse(BaseModel):
+    """Response for module-send notification callback."""
+    success: bool
+    delivered: bool
+    message_id: Optional[str] = None
+    queue_id: Optional[str] = None
+    error: Optional[str] = None
+
+@router.post("/module-send", response_model=ModuleSendResponse)
+async def module_send_notification(request: ModuleSendRequest):
+    """
+    Module callback endpoint for remote modules to send notifications.
+
+    Remote modules POST to this endpoint with a core user_id and human-readable
+    module/type names. Core resolves the Convex IDs and routes through the
+    existing notification pipeline (queue → preferences check → Telegram/WhatsApp).
+
+    Args:
+        request: Notification details including user_id, module_name,
+                 notification_type_name, content, and optional asset_ref.
+
+    Returns:
+        ModuleSendResponse with delivery status.
+
+    Raises:
+        HTTPException 404: If the module is not found.
+        HTTPException 400: If the notification type is not found.
+        HTTPException 500: If notification send fails.
+    """
+    logger.info(f"Module callback: sending notification for user {request.user_id}")
+
+    try:
+        convex_client = get_client()
+
+        # Resolve module ID by name
+        module = convex_client.query("notifications:getModuleByName", {
+            "name": request.module_name,
+        })
+        if not module:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Module '{request.module_name}' not found",
+            )
+        module_id = module["_id"]
+
+        # Resolve notification type ID by module + name
+        notification_type = convex_client.query("notifications:getNotificationTypeByName", {
+            "module": module_id,
+            "name": request.notification_type_name,
+        })
+        if not notification_type:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Notification type '{request.notification_type_name}' not found for module '{request.module_name}'",
+            )
+        notification_type_id = notification_type["_id"]
+
+        # Route through existing notification service
+        service = get_notification_service(convex_client)
+        result = await service.send(
+            user_id=request.user_id,
+            module_id=module_id,
+            notification_type_id=notification_type_id,
+            content=request.content,
+            asset_ref=request.asset_ref,
+        )
+
+        return ModuleSendResponse(
+            success=result.success,
+            delivered=result.delivered,
+            message_id=result.message_id,
+            queue_id=result.queue_id,
+            error=result.error,
+        )
+
+    except HTTPException:
+        # Re-raise our own HTTPExceptions (404, 400)
+        raise
+
+    except Exception as e:
+        logger.error(f"Error sending module notification: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),

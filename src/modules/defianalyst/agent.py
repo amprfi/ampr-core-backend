@@ -742,13 +742,15 @@ class DeFiAnalystModule(BaseModule):
             ),
         ]
 
-    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None, user_id: Optional[str] = None) -> str:
         """
         Process a user message and return cryptocurrency market data.
 
         Args:
             message: The full user message (including &defianalyst mention)
             date_context: Optional resolved date context from preprocessor
+            user_id: Optional core Convex user_id (unused by this module but
+                required for interface consistency).
 
         Returns:
             Market data response as a string

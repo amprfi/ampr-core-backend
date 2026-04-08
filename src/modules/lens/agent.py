@@ -117,12 +117,16 @@ class LensModule(BaseModule):
         from ...clients.convex_client import get_client
         return get_client()
 
-    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None, user_id: Optional[str] = None) -> str:
         """
         Process a user message by resolving the lens name from the message,
         loading the lens metadata, and running the agent.
 
         The message is expected to contain "&lens:<name>" to identify which lens to use.
+
+        Args:
+            user_id: Optional core Convex user_id (unused by this module but
+                required for interface consistency).
         """
         try:
             logger.info(f"Lens module invoked with message: {message}")

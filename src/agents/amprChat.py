@@ -213,6 +213,7 @@ async def call_specialist_module(
             module_name,
             message=question,
             date_context=ctx.deps.date_context,
+            user_id=ctx.deps.user_id,
         )
 
         if module_name not in ctx.deps.invoked_modules:
