@@ -79,6 +79,26 @@ modules:
         default_enabled: true
         priority: "medium"
 
+  - name: "education"
+    trigger: "&education"
+    service_url: "http://ampersand-modules-education.railway.internal"
+    enabled: true
+    description: "Financial education module — courses, concepts, and learning paths"
+    intents:
+      - "Find courses, tutorials, or learning paths on a financial topic"
+      - "Explain a financial concept (DeFi, yield farming, staking, etc.)"
+      - "Recommend learning resources for a user's skill level"
+      - "Quiz or test knowledge on a financial topic"
+    response_instructions: |
+      Present educational content in a clear, structured format.
+      Link to source materials when available.
+      Tailor explanations to the user's apparent knowledge level.
+    notification_types:
+      - name: "new_content"
+        description: "New educational content available matching user interests"
+        default_enabled: true
+        priority: "low"
+
   - name: "lens"
     trigger: "&lens"
     path: "src.modules.lens"
