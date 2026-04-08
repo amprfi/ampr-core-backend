@@ -81,7 +81,7 @@ modules:
 
   - name: "education"
     trigger: "&education"
-    service_url: "ampersand-modules-education.railway.internal:8080"
+    service_url: "https://ampersand-modules-education.railway.internal:8080"
     enabled: true
     description: "Financial education module — courses, concepts, and learning paths"
     intents:
