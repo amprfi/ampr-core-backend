@@ -1,3 +1,4 @@
+version: "2026.03"
 # Third-Party Module Configuration
 #
 # Modules can be loaded either in-process (via `path`) or remotely over HTTP

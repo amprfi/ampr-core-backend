@@ -1,3 +1,4 @@
+import os
 import re
 import yaml
 import logging
@@ -49,7 +50,7 @@ class ModuleRegistry:
                 self._register_module(
                     name=module_config['name'],
                     trigger=module_config['trigger'],
-                    path=module_config['path'],
+                    path=module_config.get('path'),
                     description=module_config.get('description', ''),
                     intents=module_config.get('intents', []),
                     notification_types=module_config.get('notification_types', []),
@@ -68,7 +69,7 @@ class ModuleRegistry:
         self,
         name: str,
         trigger: str,
-        path: str,
+        path: Optional[str] = None,
         description: str = "",
         intents: List[str] = None,
         notification_types: List[Dict] = None,
@@ -88,6 +89,13 @@ class ModuleRegistry:
             response_instructions: Instructions for amprChat on how to present this module's data
         """
         try:
+            # Check for environment variable override (e.g., EDUCATION_MODULE_URL)
+            env_var_name = f"{name.upper()}_MODULE_URL"
+            env_service_url = os.environ.get(env_var_name)
+            if env_service_url:
+                service_url = env_service_url
+                logger.info(f"Using {env_var_name} override for module '{name}': {service_url}")
+
             # If service_url is provided, create a RemoteModuleProxy instead of importing
             if service_url:
                 if path:
@@ -104,6 +112,10 @@ class ModuleRegistry:
                     transport=get_http_transport(),
                 )
             else:
+                if not path:
+                    logger.error(f"Module {name} has no 'path' field and no 'service_url' field")
+                    return
+
                 module = import_module(f"{path}.agent")
 
                 factory_func = getattr(module, f"get_{name}_module", None)
