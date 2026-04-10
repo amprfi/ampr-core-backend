@@ -442,12 +442,13 @@ async def get_coins_by_market_cap(
         if top_n < 3 or top_n > 20:
             return "Invalid top_n. Must be between 3 and 20."
 
-        # Fetch market data sorted by market cap
+        # Fetch market data sorted by market cap (include 7d change)
         coins = await ctx.deps.coingecko_client.get_coins_markets(
             vs_currency=vs_currency,
             order="market_cap_desc",
             per_page=top_n,
-            page=1
+            page=1,
+            price_change_percentage="7d"
         )
 
         # Filter by minimum volume ($50k)
@@ -468,11 +469,15 @@ async def get_coins_by_market_cap(
             price = coin.get("current_price", 0)
             market_cap = coin.get("market_cap", 0)
             rank = coin.get("market_cap_rank", i)
+            change_24h = coin.get("price_change_percentage_24h")
+            change_7d = coin.get("price_change_percentage_7d_in_currency")
 
             price_str = utils.format_price(price)
             mcap_str = f"${market_cap:,.0f}"
+            change_24h_str = f"{change_24h:+.2f}%" if change_24h is not None else "N/A"
+            change_7d_str = f"{change_7d:+.2f}%" if change_7d is not None else "N/A"
 
-            lines.append(f"{rank}. {name} ({symbol}): {price_str}, Market Cap: {mcap_str}")
+            lines.append(f"{rank}. {name} ({symbol}): {price_str}, Market Cap: {mcap_str}, 24h: {change_24h_str}, 7d: {change_7d_str}")
 
         result = "\n".join(lines)
 
