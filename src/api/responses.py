@@ -658,16 +658,40 @@ async def _watch_profile(context: ResponseContext, message: str):
 
         extracted = result.output
 
-        # Check which profile-watchable fields were detected
+        # Skip if no watchable fields were detected
+        if not any([extracted.country_name, extracted.preferred_currency, extracted.email, extracted.phone]):
+            return
+
+        # Fetch current profile and user data to compare against stored values
+        current_profile = await context.async_convex_client.query(
+            "profiles:getProfileByUser", {"userId": context.user_id}
+        )
+        current_user = await context.async_convex_client.query(
+            "users:getUser", {"userId": context.user_id}
+        )
+
+        # Only suggest updates for fields that differ from what's already stored
         suggestions = []
-        if extracted.country_name:
-            suggestions.append(f"your country to {extracted.country_name}")
         if extracted.preferred_currency:
-            suggestions.append(f"your preferred currency to {extracted.preferred_currency.upper()}")
+            current_currency = (current_profile or {}).get("preferred_currency", "") or ""
+            if extracted.preferred_currency.upper() != current_currency.upper():
+                suggestions.append(f"your preferred currency to {extracted.preferred_currency.upper()}")
+        if extracted.country_name:
+            current_country_data = await context.async_convex_client.query(
+                "profiles:getUserCountry", {"userId": context.user_id}
+            )
+            current_country = (current_country_data or {}).get("country")
+            current_country_name = (current_country or {}).get("country_name", "") or ""
+            if extracted.country_name.lower() != current_country_name.lower():
+                suggestions.append(f"your country to {extracted.country_name}")
         if extracted.email:
-            suggestions.append(f"your email to {extracted.email}")
+            current_email = (current_user or {}).get("email", "") or ""
+            if extracted.email.lower() != current_email.lower():
+                suggestions.append(f"your email to {extracted.email}")
         if extracted.phone:
-            suggestions.append(f"your phone number to {extracted.phone}")
+            current_phone = (current_user or {}).get("phone", "") or ""
+            if extracted.phone != current_phone:
+                suggestions.append(f"your phone number to {extracted.phone}")
 
         if not suggestions:
             return
