@@ -1,4 +1,17 @@
+version: "2026.03"
 # Third-Party Module Configuration
+#
+# Modules can be loaded either in-process (via `path`) or remotely over HTTP
+# (via `service_url`). If both are present, `service_url` takes precedence.
+#
+# For remote modules:
+#   - `service_url`: The module's Railway internal service URL
+#                   (e.g., "http://education-module.railway.internal")
+#   - `path`: Ignored if `service_url` is present
+#
+# For in-process modules:
+#   - `path`: Python import path (e.g., "src.modules.defianalyst")
+#   - `service_url`: Omitted or null
 # Defines modules that can be invoked via &mention syntax or automatically by amprChat
 
 modules:
@@ -65,6 +78,26 @@ modules:
         description: "7-day probability change exceeds threshold"
         default_enabled: true
         priority: "medium"
+
+  - name: "education"
+    trigger: "&education"
+    service_url: "http://ampersand-modules-education.railway.internal:8080"
+    enabled: true
+    description: "Financial education module — courses, concepts, and learning paths"
+    intents:
+      - "Find courses, tutorials, or learning paths on a financial topic"
+      - "Explain a financial concept (DeFi, yield farming, staking, etc.)"
+      - "Recommend learning resources for a user's skill level"
+      - "Quiz or test knowledge on a financial topic"
+    response_instructions: |
+      Present educational content in a clear, structured format.
+      Link to source materials when available.
+      Tailor explanations to the user's apparent knowledge level.
+    notification_types:
+      - name: "new_content"
+        description: "New educational content available matching user interests"
+        default_enabled: true
+        priority: "low"
 
   - name: "lens"
     trigger: "&lens"

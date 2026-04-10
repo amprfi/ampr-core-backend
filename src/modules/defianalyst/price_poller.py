@@ -146,6 +146,7 @@ class PricePoller:
 
             type_names = ["price_change_24h", "price_change_7d", "price_threshold"]
             notification_type_ids: dict[str, str] = {}
+            notification_type_priorities: dict[str, str] = {}
 
             for name in type_names:
                 notif_type = self.convex.query(
@@ -154,6 +155,7 @@ class PricePoller:
                 )
                 if notif_type:
                     notification_type_ids[name] = notif_type["_id"]
+                    notification_type_priorities[name] = notif_type.get("priority", "medium")
                 else:
                     logger.warning(f"Notification type '{name}' not registered")
 
@@ -161,7 +163,7 @@ class PricePoller:
                 logger.warning("No notification types registered, alerts disabled")
                 return None
 
-            return PriceAlertChecker(self.convex, module_id, notification_type_ids)
+            return PriceAlertChecker(self.convex, module_id, notification_type_ids, notification_type_priorities)
         except Exception as e:
             logger.error(f"Failed to initialize alert checker: {e}", exc_info=True)
             return None

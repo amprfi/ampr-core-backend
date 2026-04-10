@@ -145,6 +145,7 @@ class ProbabilityPoller:
 
             type_names = ["probability_change_24h", "probability_change_7d"]
             notification_type_ids: dict[str, str] = {}
+            notification_type_priorities: dict[str, str] = {}
 
             for name in type_names:
                 notif_type = self.convex.query(
@@ -153,6 +154,7 @@ class ProbabilityPoller:
                 )
                 if notif_type:
                     notification_type_ids[name] = notif_type["_id"]
+                    notification_type_priorities[name] = notif_type.get("priority", "medium")
                 else:
                     logger.warning(f"Notification type '{name}' not registered")
 
@@ -160,7 +162,7 @@ class ProbabilityPoller:
                 logger.warning("No notification types registered, alerts disabled")
                 return None
 
-            return ProbabilityAlertChecker(self.convex, module_id, notification_type_ids)
+            return ProbabilityAlertChecker(self.convex, module_id, notification_type_ids, notification_type_priorities)
         except Exception as e:
             logger.error(f"Failed to initialize alert checker: {e}", exc_info=True)
             return None

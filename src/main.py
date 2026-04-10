@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 
@@ -26,7 +27,10 @@ from .modules.defianalyst.price_poller import get_price_poller
 from .modules.oracle.event_poller import get_event_poller
 from .modules.oracle.probability_poller import get_probability_poller
 from .modules.registry import get_module_registry
+from .modules.remote_proxy import RemoteModuleProxy
+from .modules.transport import get_http_transport
 from .agents.interest_expiration import get_interest_expiration_job
+from convex import ConvexClient
 
 # Configure logging for Railway/production
 logging.basicConfig(
@@ -43,6 +47,12 @@ async def lifespan(app: FastAPI):
     """Start and stop background services with the application lifecycle."""
     convex_client = get_client()
 
+    # Build core_url for remote modules
+    core_url = "http://ampr-core.railway.internal"
+    railway_service_name = os.environ.get("RAILWAY_SERVICE_NAME")
+    if railway_service_name:
+        core_url = f"http://{railway_service_name}.railway.internal"
+
     # Register modules and their notification types (idempotent)
     # Use the registry's instance so _convex_client is set on the same object
     # that gets returned by get_module_registry().get_module()
@@ -54,6 +64,23 @@ async def lifespan(app: FastAPI):
     oracle = registry.get_module("oracle")
     if oracle and hasattr(oracle, "register"):
         await oracle.register(convex_client)
+
+    # Register remote modules (if any) and start retry tasks for unavailable ones
+    remote_modules = registry.get_remote_modules()
+    retry_tasks = []
+    for name, proxy in remote_modules.items():
+        try:
+            await proxy.register(convex_client, core_url)
+        except Exception as exc:
+            logger.warning(
+                f"Remote module '{name}' unavailable at startup: {exc}. "
+                "Will retry periodically in the background."
+            )
+            retry_tasks.append(
+                asyncio.create_task(
+                    retry_remote_module_registration(proxy, convex_client, core_url)
+                )
+            )
 
     queue_processor = get_queue_processor(convex_client)
     price_poller = get_price_poller(convex_client)
@@ -84,6 +111,10 @@ async def lifespan(app: FastAPI):
     probability_poller_task.cancel()
     expiration_task.cancel()
 
+    # Cancel any active remote module retry tasks
+    for task in retry_tasks:
+        task.cancel()
+
     await price_poller.close()
     await event_poller.close()
     await probability_poller.close()
@@ -91,6 +122,9 @@ async def lifespan(app: FastAPI):
     # Close the async Convex HTTP client connection pool
     async_client = get_async_client()
     await async_client.close()
+
+    # Close the HTTP transport connection pool
+    await get_http_transport().close()
 
     logger.info("Background services stopped")
 
@@ -127,6 +161,35 @@ fast_api.include_router(diagnostics.router, prefix="/api")
 @fast_api.get("/")
 async def root():
     return {"message": "Hello from Ampr"}
+
+async def retry_remote_module_registration(
+    proxy: RemoteModuleProxy,
+    convex_client: ConvexClient,
+    core_url: str,
+    interval_seconds: int = 30,
+) -> None:
+    """
+    Retry registering a remote module until it becomes available.
+
+    Runs in a background task during application lifespan. Logs warnings
+    on each failure and info on success. Stops when the module registers
+    successfully or when the task is cancelled during shutdown.
+    """
+    while True:
+        try:
+            await proxy.register(convex_client, core_url)
+            logger.info(f"Remote module '{proxy.name}' became available after retry")
+            return  # Success — stop retrying
+        except Exception as exc:
+            logger.warning(
+                f"Retry failed for remote module '{proxy.name}': {exc}. "
+                f"Will retry in {interval_seconds} seconds."
+            )
+            try:
+                await asyncio.sleep(interval_seconds)
+            except asyncio.CancelledError:
+                logger.info(f"Stopping retry task for remote module '{proxy.name}'")
+                return  # Task cancelled during shutdown
 
 @fast_api.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):

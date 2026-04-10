@@ -1,6 +1,6 @@
 [project]
 name = "ampr-core-backend"
-version = "0.1.dev0"
+version = "2026.03"
 description = ""
 authors = [
     {name = "Chris Georgen",email = "c-georgen@users.noreply.github.com"}

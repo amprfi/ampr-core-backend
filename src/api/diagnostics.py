@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
 
+
+@router.get("/version", status_code=status.HTTP_200_OK)
+async def get_version():
+    """Return the current service version."""
+    return {
+        "version": "2026.03",
+        "service": "ampr-core-backend",
+    }
+
+
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
 

@@ -29,20 +29,23 @@ class ModuleInterface(Protocol):
     name: str
     trigger: str
 
-    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None, user_id: Optional[str] = None) -> str:
+        ...
+
+    async def register(self, convex_client: ConvexClient, core_url: Optional[str] = None) -> str:
         """
-        Process a user message and return a response.
+        Register the module with core (remote modules only).
+
+        For in-process modules, this is called during startup to register
+        notification types. For remote modules, it's called by main.py to
+        exchange core_url and receive the module's manifest.
 
         Args:
-            message: The full user message (including the &mention trigger)
-            date_context: Optional resolved date context from preprocessor
-                (e.g., '[DATE CONTEXT]\n• "a few weeks ago" = 08-12-2025')
+            convex_client: Core's Convex client
+            core_url: Optional core base URL for remote modules
 
         Returns:
-            The module's response as a string
-
-        Raises:
-            Exception: If the module fails to process the message
+            The module's Convex module_id
         """
         ...
 
@@ -71,7 +74,7 @@ class BaseModule(ABC):
         """
         return []
 
-    async def register(self, convex_client: ConvexClient) -> str:
+    async def register(self, convex_client: ConvexClient, core_url: Optional[str] = None) -> str:
         """
         Register the module and its notification types with Convex.
 
@@ -200,7 +203,7 @@ class BaseModule(ABC):
         pass
 
     @abstractmethod
-    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None, user_id: Optional[str] = None) -> str:
         """
         Process a user message and return a response.
 
@@ -208,6 +211,9 @@ class BaseModule(ABC):
             message: The full user message (including the &mention trigger)
             date_context: Optional resolved date context from preprocessor
                 (e.g., '[DATE CONTEXT]\n• "a few weeks ago" = 08-12-2025')
+            user_id: Optional core Convex user_id, forwarded from amprChat context.
+                Remote modules use this to query their own data. In-process modules
+                may ignore it.
 
         Returns:
             The module's response as a string

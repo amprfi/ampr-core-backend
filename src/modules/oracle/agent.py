@@ -350,7 +350,16 @@ class OracleModule(BaseModule):
         from ...clients.convex_client import get_client
         return get_client()
 
-    async def invoke(self, message: str, date_context: Optional[str] = None) -> str:
+    async def invoke(self, message: str, date_context: Optional[str] = None, user_id: Optional[str] = None) -> str:
+        """
+        Process a user message and return prediction market data.
+
+        Args:
+            message: The user message to process
+            date_context: Optional resolved date context from preprocessor
+            user_id: Optional core Convex user_id (unused by this module but
+                required for interface consistency).
+        """
         try:
             logger.info(f"Oracle invoked with message: {message}")
 

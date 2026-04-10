@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 COOLDOWN_24H_MS = 24 * 60 * 60 * 1000
 COOLDOWN_7D_MS = 7 * 24 * 60 * 60 * 1000
 
+# Grace period after alert creation during which non-high-priority notifications
+# are suppressed. Prevents a spurious immediate fire when the event's rolling
+# probability-change window already exceeded the threshold before the alert was set.
+GRACE_PERIOD_MS = 4 * 60 * 60 * 1000
+
 
 class ProbabilityAlertChecker:
     """
@@ -40,6 +45,7 @@ class ProbabilityAlertChecker:
         convex_client: ConvexClient,
         module_id: str,
         notification_type_ids: dict[str, str],
+        notification_type_priorities: dict[str, str],
     ):
         """
         Args:
@@ -47,10 +53,13 @@ class ProbabilityAlertChecker:
             module_id: Convex ID of the oracle module
             notification_type_ids: Map of type name -> Convex ID
                 e.g. {"probability_change_24h": "...", "probability_change_7d": "..."}
+            notification_type_priorities: Map of type name -> priority string
+                e.g. {"probability_change_24h": "medium", "probability_change_7d": "medium"}
         """
         self.convex = convex_client
         self.module_id = module_id
         self.notification_type_ids = notification_type_ids
+        self.notification_type_priorities = notification_type_priorities
         self.notification_service = get_notification_service(convex_client)
 
     async def check_alerts(self, updated_events: list[dict]) -> int:
@@ -190,12 +199,26 @@ class ProbabilityAlertChecker:
         now: float,
     ) -> bool:
         """Check a single percentage alert for deduplication and send if eligible."""
+        # Resolve effective priority for this alert:
+        # 2x threshold → always "high"; otherwise use the notification type's default.
+        type_name = "probability_change_24h" if alert_kind == "percentage_24h" else "probability_change_7d"
+        default_priority = self.notification_type_priorities.get(type_name, "medium")
+        priority = "high" if abs(pct_change) >= threshold * 2 else default_priority
+
+        # Grace period suppression: within the first GRACE_PERIOD_MS after the alert
+        # was created, only send high-priority notifications. This prevents a spurious
+        # immediate notification caused by probability movement that predates the alert.
+        created_at = alert_row.get("_creationTime")
+        if created_at is not None and (now - created_at < GRACE_PERIOD_MS):
+            if priority != "high":
+                return False
+
         if alert_row.get("last_triggered_at") is not None:
             elapsed = now - alert_row["last_triggered_at"]
             if elapsed < cooldown_ms:
-                # In cooldown — check for 2x override
+                # In cooldown — allow a one-time high-priority override
                 override_alerted_at = watcher.get("override_alerted_at") if watcher else None
-                if abs(pct_change) >= threshold * 2 and override_alerted_at is None:
+                if priority == "high" and override_alerted_at is None:
                     return await self._send_percentage_alert(
                         user_id=user_id,
                         event_data=event_data,
@@ -207,6 +230,7 @@ class ProbabilityAlertChecker:
                         threshold=threshold,
                         timeframe_label=timeframe_label,
                         now=now,
+                        priority=priority,
                         is_override=True,
                     )
                 return False
@@ -222,6 +246,7 @@ class ProbabilityAlertChecker:
             threshold=threshold,
             timeframe_label=timeframe_label,
             now=now,
+            priority=priority,
             is_override=False,
         )
 
@@ -237,6 +262,7 @@ class ProbabilityAlertChecker:
         threshold: float,
         timeframe_label: str,
         now: float,
+        priority: str,
         is_override: bool,
     ) -> bool:
         """Format and send a percentage alert. Returns True if successful."""
@@ -247,9 +273,6 @@ class ProbabilityAlertChecker:
         notification_type_id = self.notification_type_ids.get(type_name)
         if not notification_type_id:
             return False
-
-        # 2x threshold → high priority override
-        priority = "high" if abs(pct_change) >= threshold * 2 else None
 
         content = self._format_percentage_alert(
             event_data, triggering_market, pct_change, threshold, timeframe_label
