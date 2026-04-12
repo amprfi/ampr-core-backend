@@ -18,7 +18,7 @@ from ..agents.extractor import get_extractor_agent, ExtractorContext, HORIZON_MA
 from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
 from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..agents.watchlist_inferrer import infer_watchlist
-from ..agents.currency_converter import convert_currency
+from ..agents.currency_inferrer import infer_display_currency
 from ..modules.registry import get_module_registry
 from ..utils.formatting import strip_markdown
 from ..clients.async_convex_client import AsyncConvexClient, get_async_client
@@ -122,6 +122,11 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             _infer_watchlist(context.convex_client, context.user_id, context.message_content)
         )
 
+        # Start currency inference concurrently (awaited before agent runs)
+        currency_task = asyncio.create_task(
+            infer_display_currency(context.message_content, context.user_id, context.async_convex_client)
+        )
+
         # Normalize &help prefix to a natural language help request
         stripped = context.message_content.strip()
         if stripped.lower() == "&help" or stripped.lower().startswith("&help "):
@@ -160,20 +165,6 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                 error_msg = f"Module '{module_name}' failed: {str(e)}"
                 logger.error(error_msg, exc_info=True)
                 module_response = f"ERROR: {error_msg}"
-
-        # Convert module response to user's preferred currency if needed
-        if module_response and not module_response.startswith("ERROR:"):
-            try:
-                currency_result = await context.async_convex_client.query(
-                    "profiles:getUserCurrency", {"userId": context.user_id}
-                )
-                preferred_currency = currency_result.get("preferred_currency") if currency_result else None
-
-                if preferred_currency and preferred_currency.upper() != "USD":
-                    logger.info(f"User prefers {preferred_currency}, converting module response")
-                    module_response = await convert_currency(module_response, preferred_currency)
-            except Exception as e:
-                logger.warning(f"Currency conversion failed, using original USD response: {e}")
 
         # Detect unresolved module triggers (e.g., &lens, &foo — patterns not matched by any registered module)
         interim_messages = []
@@ -283,6 +274,9 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         {context.message_content}{date_context_section}
         {module_not_found_section}"""
 
+        # Await currency inference (should already be complete by now)
+        currency_context = await currency_task
+
         # Get the agent response with enhanced context (retry on transient LLM errors)
         import time
         max_retries = 3
@@ -312,6 +306,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                         module_already_invoked=module_name is not None,
                         channel=context.channel,
                         telegram_id=context.telegram_id,
+                        currency_context=currency_context,
                     )
                     result = await amprChat_agent.run(
                         context_str,

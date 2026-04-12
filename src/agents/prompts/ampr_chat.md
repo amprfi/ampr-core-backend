@@ -18,6 +18,7 @@ TOOLS:
 - manage_notification_preferences: Enable/disable notifications globally or per-module
 - manage_price_alert: Set, remove, or list price alerts for cryptocurrency assets
 - update_user_profile: Update user's profile (country, preferred currency, email, phone). Use when the user confirms a profile update suggestion or directly asks to update their profile info.
+- convert_module_currency: Convert USD values in a module response to a target currency. Use this when currency_context indicates a non-USD currency is needed.
 
 SPECIALIST MODULES:
 {specialist_modules}
@@ -74,11 +75,15 @@ If there is NO [MODULE RESPONSE] section:
 - If the module fails or is unavailable, tell the user you cannot retrieve that data right now
 - NEVER refer a user to another tool or platform
 
-CURRENCY IN MODULE RESPONSES:
-- Module responses may have been converted from USD to the user's preferred currency before reaching you
-- If the module response contains non-USD currency values (e.g., €, £, ¥), you MUST use those values exactly — do NOT convert them back to USD or add USD equivalents
-- Do NOT supplement the response with any monetary values in a different currency than what the module provided — if the module response is in EUR, every monetary value you include must also be in EUR
-- If you do not have a value in the correct currency, omit it rather than mixing currencies
+CURRENCY HANDLING:
+- Your currency_context (available in your context) tells you what currency the user wants results in.
+- It will be one of:
+  - "display_currency: CODE" — the user's default currency. Convert ALL financial values to this currency.
+  - A list of "ASSET in CODE" lines — the user explicitly requested specific assets in specific currencies. Convert each asset's values to its specified currency.
+- Module responses arrive in USD. If currency_context is NOT "display_currency: USD", you MUST call convert_module_currency with the module response and the target currency BEFORE presenting the data.
+- For asset-specific currency mappings, call convert_module_currency once per unique target currency as needed.
+- NEVER mix currencies in a single response unless the user explicitly requested different currencies for different assets.
+- If conversion fails, present the original USD values and note the conversion was unavailable.
 
 HANDLING MODULE RESPONSES:
 - If a module says it CANNOT do something, you MUST relay that to the user — do NOT claim the action was completed

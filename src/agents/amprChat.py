@@ -22,6 +22,7 @@ class TalkerContext(BaseModel):
     module_already_invoked: bool = False  # True if &mention already triggered a module
     channel: str | None = None
     telegram_id: str | None = None
+    currency_context: str = "display_currency: USD"
 
 agent = Agent(
     "mistral:mistral-medium-latest",
@@ -220,19 +221,6 @@ async def call_specialist_module(
             ctx.deps.invoked_modules.append(module_name)
 
         logger.info(f"Tool result: call_specialist_module for {module_name} succeeded")
-
-        # Convert to user's preferred currency if needed
-        try:
-            currency_result = ctx.deps.convex_client.query(
-                "profiles:getUserCurrency", {"userId": ctx.deps.user_id}
-            )
-            preferred_currency = currency_result.get("preferred_currency") if currency_result else None
-
-            if preferred_currency and preferred_currency.upper() != "USD":
-                logger.info(f"User prefers {preferred_currency}, converting module response")
-                result = await convert_currency(result, preferred_currency)
-        except Exception as e:
-            logger.warning(f"Currency conversion failed, using original USD response: {e}")
 
         # Prepend module-specific response instructions and constraints if available
         response_instructions = registry.get_response_instructions(module_name)
@@ -687,6 +675,29 @@ async def update_user_profile(
 
     return f"Successfully updated: {', '.join(results)}"
 
+@agent.tool
+async def convert_module_currency(
+    ctx: RunContext[TalkerContext],
+    module_response: str,
+    target_currency: str,
+) -> str:
+    """
+    Convert USD monetary values in a module response to a target currency.
+    Use this after receiving financial data from a specialist module when the
+    currency_context indicates the user wants results in a non-USD currency.
+
+    Args:
+        module_response: The financial text containing USD values to convert
+        target_currency: The ISO 4217 currency code to convert to (e.g., "EUR", "GBP")
+    """
+    logger.info(f"Tool called: convert_module_currency to {target_currency} for user_id={ctx.deps.user_id}")
+    try:
+        converted = await convert_currency(module_response, target_currency)
+        return converted
+    except Exception as e:
+        logger.warning(f"Currency conversion failed: {e}")
+        return module_response
+
 
 PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/ampr_chat.md").read_text()
 
@@ -704,7 +715,9 @@ async def get_system_prompt(ctx: RunContext[TalkerContext]) -> str:
             lines.append(f"  - {intent}")
 
     specialist_modules_str = "\n".join(lines)
-    return PROMPT_TEMPLATE.format(specialist_modules=specialist_modules_str)
+    prompt = PROMPT_TEMPLATE.format(specialist_modules=specialist_modules_str)
+    prompt += f"\n\nCURRENCY CONTEXT:\n{ctx.deps.currency_context}"
+    return prompt
 
 async def _send_tool_interim_message(deps: TalkerContext, module_name: str, registry) -> None:
     """Send an interim message when amprChat invokes a module via tool call."""
