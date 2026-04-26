@@ -139,6 +139,14 @@ class DatePreprocessorAgent:
                 data = resp.json()
 
             content = data["choices"][0]["message"]["content"]
+            # Mistral may return content as either a string or a list of typed chunks
+            # (TextChunk, ThinkChunk, ...) when reasoning is enabled. Extract the text.
+            if isinstance(content, list):
+                content = "".join(
+                    chunk.get("text", "")
+                    for chunk in content
+                    if isinstance(chunk, dict) and chunk.get("type") == "text"
+                )
             parsed = json.loads(content)
             date_context = DateContext(**parsed)
             logger.info(f"Date preprocessor resolved {len(date_context.date_references)} reference(s)")

@@ -65,6 +65,65 @@ TOOLS = [
 ]
 
 
+def _extract_text_content(content) -> str:
+    """
+    Extract plain text from Mistral response content.
+
+    Mistral may return ``content`` as either a string or a list of typed chunks
+    (TextChunk, ThinkChunk, etc.). Callers that need a string (e.g. for downstream
+    presentation or json.loads) should run the value through this helper.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for chunk in content:
+        if not isinstance(chunk, dict):
+            continue
+        if chunk.get("type") == "text":
+            parts.append(chunk.get("text", ""))
+    return "".join(parts)
+
+
+def _sanitize_assistant_msg(msg: dict) -> dict:
+    """
+    Sanitize an assistant message returned by Mistral before sending it back as input.
+
+    Mistral's API is asymmetric: it returns extra fields (e.g. ``signature``, ``closed`` on
+    ThinkChunks) that its own input validator rejects with HTTP 422 ("extra_forbidden").
+    This function keeps only the fields the input schema allows, so the message can be
+    safely echoed back into ``messages``.
+    """
+    cleaned: dict = {"role": msg.get("role", "assistant")}
+
+    if msg.get("tool_calls"):
+        cleaned["tool_calls"] = msg["tool_calls"]
+
+    content = msg.get("content")
+    if isinstance(content, list):
+        cleaned_chunks = []
+        for chunk in content:
+            if not isinstance(chunk, dict):
+                cleaned_chunks.append(chunk)
+                continue
+            chunk_type = chunk.get("type")
+            if chunk_type == "thinking":
+                # ThinkChunk input schema only allows {type, thinking}; drop signature/closed.
+                cleaned_chunks.append({"type": "thinking", "thinking": chunk.get("thinking")})
+            elif chunk_type == "text":
+                cleaned_chunks.append({"type": "text", "text": chunk.get("text", "")})
+            else:
+                # Unknown chunk type — pass through unchanged and let Mistral validate.
+                cleaned_chunks.append(chunk)
+        cleaned["content"] = cleaned_chunks
+    else:
+        # String or None — assistant messages with only tool_calls commonly have empty content.
+        cleaned["content"] = content if content is not None else ""
+
+    return cleaned
+
+
 async def _call_mistral(
     messages: list[dict],
     tools: list[dict] | None = None,
@@ -90,7 +149,11 @@ async def _call_mistral(
             },
             json=body,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError:
+            logger.error("Mistral API error %s body: %s", resp.status_code, resp.text)
+            raise
         return resp.json()
 
 
@@ -286,11 +349,13 @@ async def _run_oracle_agent(
         choice = response["choices"][0]
         assistant_msg = choice["message"]
 
-        messages.append(assistant_msg)
+        # Sanitize before re-appending: Mistral returns extra fields (e.g. signature, closed
+        # on thinking chunks) that its own input validator rejects with 422.
+        messages.append(_sanitize_assistant_msg(assistant_msg))
 
         tool_calls = assistant_msg.get("tool_calls")
         if not tool_calls:
-            return assistant_msg.get("content", "")
+            return _extract_text_content(assistant_msg.get("content", ""))
 
         for tc in tool_calls:
             fn_name = tc["function"]["name"]
