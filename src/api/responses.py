@@ -12,7 +12,7 @@ from typing import Optional, Sequence, Union
 from convex import ConvexClient
 import json
 
-from ..agents.amprChat import get_amprChat_agent, TalkerContext
+from ..agents.amprChat import get_amprChat_agent, TalkerContext, build_help_overview
 from ..agents.summarizer import get_summarizer_agent, SummarizerContext
 from ..agents.extractor import get_extractor_agent, ExtractorContext, HORIZON_MAP, KNOWLEDGE_MAP
 from ..agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
@@ -106,6 +106,39 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         logger.info(f"Stored user message in database for chat {context.chat_id}")
 
+        # --- FAST PATH: bare &help ---
+        # The help overview is fully deterministic (built from the in-memory
+        # module registry + pyproject.toml metadata). Running it through the LLM
+        # added ~25s of pure rewording latency and risked dropping the markdown
+        # link. Short-circuit here: store, deliver, and return without any LLM
+        # calls or downstream agent work.
+        if context.message_content.strip().lower() == "&help":
+            logger.info("Bare &help detected, returning canonical help overview without LLM")
+            help_text = build_help_overview()
+            response_content = strip_markdown(help_text) if context.channel == "sms" else help_text
+
+            await context.async_convex_client.mutation(
+                "messages:createMessage",
+                {
+                    "userId": context.user_id,
+                    "role": "assistant",
+                    "channel": context.channel,
+                    "content": response_content,
+                },
+            )
+
+            if context.channel == "telegram" and context.telegram_id:
+                from ..clients.telegram_client import TelegramClient
+                telegram_client = TelegramClient()
+                # Match the chunking used elsewhere — one message per paragraph break.
+                telegram_chunks = [c.strip() for c in response_content.split("\n\n") if c.strip()]
+                for chunk in telegram_chunks:
+                    await telegram_client.send_message(chat_id=int(context.telegram_id), text=chunk)
+                await telegram_client.close()
+
+            logger.info(f"Stored AI response in database for chat {context.chat_id}")
+            return [response_content]
+
         # --- PHASE 2: Immediately fire DB fetch + watchlist inference ---
 
         # Start DB fetch now (don't await — we'll collect results before step 6)
@@ -122,16 +155,20 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
             _infer_watchlist(context.convex_client, context.user_id, context.message_content)
         )
 
-        # Start currency inference concurrently (awaited before agent runs)
+        # Start currency inference concurrently (awaited before agent runs).
         currency_task = asyncio.create_task(
             infer_display_currency(context.message_content, context.user_id, context.async_convex_client)
         )
 
-        # Normalize &help prefix to a natural language help request
+        # Normalize &help prefix when followed by a real question.
+        # Bare "&help" was already handled above by the FAST PATH and will not
+        # reach this point. For "&help <rest>" we strip the prefix and let the
+        # agent route the trailing question normally (e.g. to get_all_alerts,
+        # get_user_watchlist, a specialist module, etc.).
         stripped = context.message_content.strip()
-        if stripped.lower() == "&help" or stripped.lower().startswith("&help "):
-            context.message_content = "I need help. What can you do?"
-            logger.info("Detected &help prefix, rewritten to natural language help request")
+        if stripped.lower().startswith("&help "):
+            context.message_content = stripped[len("&help "):].strip()
+            logger.info("Detected &help prefix with trailing question; stripped prefix and preserved the rest")
 
         # --- PHASE 3: Await date preprocessor, then run module if triggered ---
 

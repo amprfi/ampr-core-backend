@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, ConfigDict
@@ -12,6 +13,31 @@ from src.modules.registry import get_module_registry
 from src.agents.currency_converter import convert_currency
 
 logger = logging.getLogger(__name__)
+
+# Path to the project's pyproject.toml — used by get_help_overview to surface
+# the current version and latest update summary/link defined under [tool.ampr].
+_PYPROJECT_PATH = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+
+def _load_project_metadata() -> Dict[str, str]:
+    """Read [project].version and [tool.ampr] fields from pyproject.toml.
+
+    Returns an empty-ish dict on any read/parse failure so the help tool
+    degrades gracefully rather than failing the whole chat response.
+    """
+    try:
+        with _PYPROJECT_PATH.open("rb") as f:
+            data = tomllib.load(f)
+        version = data.get("project", {}).get("version", "")
+        ampr = data.get("tool", {}).get("ampr", {})
+        return {
+            "version": version,
+            "latest_update_summary": ampr.get("latest_update_summary", "") or "",
+            "latest_update_link": ampr.get("latest_update_link", "") or "",
+        }
+    except Exception as e:
+        logger.warning(f"Could not read project metadata from pyproject.toml: {e}")
+        return {"version": "", "latest_update_summary": "", "latest_update_link": ""}
 
 class TalkerContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -88,14 +114,16 @@ async def user_investment_preferences(ctx: RunContext[TalkerContext]) -> List[st
         logger.error(f"Tool error: user_investment_preferences - {error_msg}")
         return [error_msg]
 
-@agent.tool
-async def get_help_overview(ctx: RunContext[TalkerContext]) -> str:
+def build_help_overview() -> str:
     """
-    Get an overview of Ampersand's capabilities and all available modules.
-    Call this when the user asks for help, says "&help", asks "what can you do",
-    or wants to know what features are available.
+    Build the static help-overview text for Ampersand.
+
+    Pure function (no side effects, no LLM, no DB) — produced from the in-memory
+    module registry and `[tool.ampr]` fields in pyproject.toml. Exposed at module
+    scope so it can be called both from the `get_help_overview` agent tool and
+    from a fast-path in `src/api/responses.py` that bypasses the LLM for bare
+    `&help` (since the content is fully deterministic).
     """
-    logger.info("Tool called: get_help_overview")
     registry = get_module_registry()
     modules = registry.list_modules()
 
@@ -125,41 +153,234 @@ async def get_help_overview(ctx: RunContext[TalkerContext]) -> str:
     lines.append("")
     lines.append("You can invoke a module directly by mentioning its trigger (e.g., &defianalyst what is the price of BTC?) or just ask me naturally and I'll route to the right module.")
 
-    result = "\n".join(lines)
-    logger.info(f"Tool result: get_help_overview returned overview with {len(modules)} modules")
-    return result
+    # Append a "Latest update" footer when both version and summary are configured.
+    # Link is optional — if missing, we still show the summary line.
+    meta = _load_project_metadata()
+    version = meta["version"]
+    summary = meta["latest_update_summary"]
+    link = meta["latest_update_link"]
+    if version and summary:
+        if link:
+            lines.append("")
+            lines.append(f"**Latest update ({version}):** {summary} — [Read more]({link})")
+        else:
+            lines.append("")
+            lines.append(f"**Latest update ({version}):** {summary}")
+
+    return "\n".join(lines)
+
 
 @agent.tool
-async def get_user_watchlist(ctx: RunContext[TalkerContext]) -> str:
+async def get_help_overview(ctx: RunContext[TalkerContext]) -> str:
     """
-    Get the user's current watchlist showing all assets they are watching.
-    Call this when the user asks about their watchlist, what they're tracking,
-    or what assets they're following.
+    Get an overview of Ampersand's capabilities and all available modules.
+    Call this when the user asks for help, says "&help", asks "what can you do",
+    or wants to know what features are available.
     """
-    logger.info(f"Tool called: get_user_watchlist for user_id={ctx.deps.user_id}")
+    logger.info("Tool called: get_help_overview")
+    result = build_help_overview()
+    logger.info("Tool result: get_help_overview returned overview")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Shared formatters for watchlist/alert listings.
+# Used by both the dedicated tools (get_user_watchlist, manage_price_alert,
+# manage_prediction_alert, manage_notification_preferences) and the unified
+# views (get_all_alerts) to avoid duplicating formatting logic.
+# ---------------------------------------------------------------------------
+
+def _format_asset_watchlist(items: list) -> str:
+    """Render the asset watchlist (portfolioItems:getWatchlist) for display."""
+    if not items:
+        return "Your asset watchlist is currently empty."
+    lines = []
+    for item in items:
+        asset = item.get("asset_details", {}) or {}
+        name = asset.get("name", "Unknown")
+        ticker = asset.get("ticker", "")
+        status = item.get("asset_status", "watching")
+        label = f"{name} ({ticker})" if ticker else name
+        status_label = "watching" if status == "stated watch" else "auto-detected"
+        lines.append(f"- {label} [{status_label}]")
+    return f"Asset watchlist ({len(items)}):\n" + "\n".join(lines)
+
+
+def _format_event_watchlist(items: list) -> str:
+    """Render the prediction-event watchlist (watchlistEvents:getWatchlistByUser)."""
+    if not items:
+        return "Your prediction event watchlist is currently empty."
+    lines = []
+    for item in items:
+        event = item.get("event_details") or {}
+        title = event.get("title", "Unknown event")
+        status = item.get("event_status", "watching")
+        # Map raw statuses to user-friendly labels (mirrors the asset watchlist tone).
+        status_label = {
+            "stated watch": "watching",
+            "inferred watch": "auto-detected",
+            "pending inferred watch": "auto-detected (pending)",
+        }.get(status, status)
+        lines.append(f"- {title} [{status_label}]")
+    return f"Prediction event watchlist ({len(items)}):\n" + "\n".join(lines)
+
+
+def _format_price_alerts(convex, user_id: str) -> str:
+    """Render the user's active price alerts. Returns a human-readable string."""
+    alerts = convex.query("priceAlerts:getUserAlerts", {"user": user_id})
+    if not alerts:
+        return "You have no active price alerts."
+    lines = []
+    for alert in alerts:
+        asset = convex.query("assets:getAsset", {"id": alert["asset"]}) if alert.get("asset") else None
+        label = f"{asset.get('name', '')} ({asset.get('ticker', '')})" if asset else "Default"
+        if alert["alert_kind"] == "absolute_price":
+            lines.append(f"- {label}: alert when price goes {alert.get('direction')} ${alert.get('target_price')}")
+        else:
+            period = "24h" if alert["alert_kind"] == "percentage_24h" else "7d"
+            lines.append(f"- {label}: {period} change exceeds {alert.get('threshold_pct')}%")
+    return "Your active price alerts:\n" + "\n".join(lines)
+
+
+def _format_prediction_alerts(convex, user_id: str) -> str:
+    """Render the user's active prediction alerts."""
+    alerts = convex.query("predictionAlerts:getUserAlerts", {"user": user_id})
+    if not alerts:
+        return "You have no active prediction alerts."
+    lines = []
+    for alert in alerts:
+        event = convex.query("predictionEvents:getEvent", {"id": alert["event"]}) if alert.get("event") else None
+        label = event.get("title", "Unknown") if event else "Default"
+        period = "24h" if alert["alert_kind"] == "percentage_24h" else "7d"
+        threshold = alert.get("threshold_pct", 0)
+        lines.append(f"- {label}: {period} probability change exceeds {threshold:.0%}")
+    return "Your active prediction alerts:\n" + "\n".join(lines)
+
+
+def _format_notification_prefs(convex, user_id: str) -> str:
+    """Render the user's notification preferences (global + per-module)."""
+    prefs = convex.query("notifications:getUserPreferences", {"user": user_id})
+    if not prefs:
+        return "No custom notification preferences set. All notifications use default settings."
+    lines = []
+    for pref in prefs:
+        scope = "Global"
+        if pref.get("module"):
+            module = convex.query("notifications:getModule", {"id": pref["module"]})
+            scope = f"Module: {module.get('name', 'unknown')}" if module else "Module: unknown"
+        status = "enabled" if pref.get("enabled") else "disabled"
+        lines.append(f"- {scope}: {status}")
+    return "Current notification preferences:\n" + "\n".join(lines)
+
+
+# Allowed values for the watchlist `types` parameter.
+_WATCHLIST_TYPES = ("asset", "event")
+# Allowed values for the alerts `types` parameter.
+_ALERT_TYPES = ("price", "prediction", "preferences")
+
+
+@agent.tool
+async def get_user_watchlist(
+    ctx: RunContext[TalkerContext],
+    types: Optional[List[str]] = None,
+) -> str:
+    """
+    Get the user's current watchlist(s).
+
+    Args:
+        types: Optional list filtering which kinds of watchlists to include.
+            Allowed values: "asset" (cryptocurrencies tracked via DeFiAnalyst),
+            "event" (prediction-market events tracked via Oracle).
+            Defaults to all types when omitted.
+
+    Returns:
+        A human-readable summary covering each requested watchlist type.
+        Use type-specific calls (e.g., types=["asset"]) when the user asks
+        narrowly about one kind of watchlist; default to both for general
+        "what am I tracking?" questions.
+    """
+    logger.info(
+        f"Tool called: get_user_watchlist for user_id={ctx.deps.user_id} types={types}"
+    )
+
+    requested = list(types) if types else list(_WATCHLIST_TYPES)
+    invalid = [t for t in requested if t not in _WATCHLIST_TYPES]
+    if invalid:
+        return (
+            f"ERROR: Unknown watchlist type(s): {', '.join(invalid)}. "
+            f"Valid types: {', '.join(_WATCHLIST_TYPES)}."
+        )
+
+    sections: List[str] = []
     try:
-        items = ctx.deps.convex_client.query("portfolioItems:getWatchlist", {
-            "user": ctx.deps.user_id
-        })
-
-        if not items:
-            return "Your watchlist is currently empty. You can ask me about any asset and I'll start tracking it for you, or tell me to add something to your watchlist."
-
-        lines = []
-        for item in items:
-            asset = item.get("asset_details", {})
-            name = asset.get("name", "Unknown")
-            ticker = asset.get("ticker", "")
-            status = item.get("asset_status", "watching")
-            label = f"{name} ({ticker})" if ticker else name
-            status_label = "watching" if status == "stated watch" else "auto-detected"
-            lines.append(f"- {label} [{status_label}]")
-
-        return f"Your watchlist ({len(items)} assets):\n" + "\n".join(lines)
+        if "asset" in requested:
+            items = ctx.deps.convex_client.query(
+                "portfolioItems:getWatchlist", {"user": ctx.deps.user_id}
+            )
+            sections.append(_format_asset_watchlist(items or []))
+        if "event" in requested:
+            items = ctx.deps.convex_client.query(
+                "watchlistEvents:getWatchlistByUser", {"user": ctx.deps.user_id}
+            )
+            sections.append(_format_event_watchlist(items or []))
     except Exception as e:
         error_msg = f"Error retrieving watchlist: {str(e)}"
         logger.error(f"Tool error: get_user_watchlist - {error_msg}")
         return f"ERROR: {error_msg}"
+
+    return "\n\n".join(sections)
+
+
+@agent.tool
+async def get_all_alerts(
+    ctx: RunContext[TalkerContext],
+    types: Optional[List[str]] = None,
+) -> str:
+    """
+    Get a consolidated view of the user's active alerts and notification settings.
+
+    Use this when the user asks broadly about "my alerts" or "my notifications"
+    and you want a single response covering everything. For narrow operations
+    (set/remove an alert), keep using manage_price_alert or manage_prediction_alert.
+
+    Args:
+        types: Optional list filtering which sections to include. Allowed values:
+            "price" (cryptocurrency price alerts),
+            "prediction" (prediction-market probability alerts),
+            "preferences" (global / per-module notification on/off settings).
+            Defaults to all sections when omitted.
+
+    Returns:
+        A human-readable summary with one section per requested type.
+    """
+    logger.info(
+        f"Tool called: get_all_alerts for user_id={ctx.deps.user_id} types={types}"
+    )
+
+    requested = list(types) if types else list(_ALERT_TYPES)
+    invalid = [t for t in requested if t not in _ALERT_TYPES]
+    if invalid:
+        return (
+            f"ERROR: Unknown alert type(s): {', '.join(invalid)}. "
+            f"Valid types: {', '.join(_ALERT_TYPES)}."
+        )
+
+    convex = ctx.deps.convex_client
+    user_id = ctx.deps.user_id
+    sections: List[str] = []
+    try:
+        if "price" in requested:
+            sections.append(_format_price_alerts(convex, user_id))
+        if "prediction" in requested:
+            sections.append(_format_prediction_alerts(convex, user_id))
+        if "preferences" in requested:
+            sections.append(_format_notification_prefs(convex, user_id))
+    except Exception as e:
+        error_msg = f"Error retrieving alerts: {str(e)}"
+        logger.error(f"Tool error: get_all_alerts - {error_msg}")
+        return f"ERROR: {error_msg}"
+
+    return "\n\n".join(sections)
 
 @agent.tool
 async def list_specialist_modules(ctx: RunContext[TalkerContext]) -> List[Dict[str, str]]:
@@ -266,19 +487,7 @@ async def manage_notification_preferences(
 
     try:
         if action == "get_status":
-            prefs = convex.query("notifications:getUserPreferences", {"user": user_id})
-            if not prefs:
-                return "No custom notification preferences set. All notifications use default settings."
-
-            lines = []
-            for pref in prefs:
-                scope = "Global"
-                if pref.get("module"):
-                    module = convex.query("notifications:getModule", {"id": pref["module"]})
-                    scope = f"Module: {module.get('name', 'unknown')}" if module else "Module: unknown"
-                status = "enabled" if pref.get("enabled") else "disabled"
-                lines.append(f"- {scope}: {status}")
-            return "Current notification preferences:\n" + "\n".join(lines)
+            return _format_notification_prefs(convex, user_id)
 
         elif action == "set_global":
             if enabled is None:
@@ -354,22 +563,7 @@ async def manage_price_alert(
 
     try:
         if action == "list":
-            alerts = convex.query("priceAlerts:getUserAlerts", {"user": user_id})
-            if not alerts:
-                return "You have no active price alerts."
-
-            lines = []
-            for alert in alerts:
-                asset = convex.query("assets:getAsset", {"id": alert["asset"]}) if alert.get("asset") else None
-                label = f"{asset.get('name', '')} ({asset.get('ticker', '')})" if asset else "Default"
-
-                if alert["alert_kind"] == "absolute_price":
-                    lines.append(f"- {label}: alert when price goes {alert.get('direction')} ${alert.get('target_price')}")
-                else:
-                    period = "24h" if alert["alert_kind"] == "percentage_24h" else "7d"
-                    lines.append(f"- {label}: {period} change exceeds {alert.get('threshold_pct')}%")
-
-            return "Your active price alerts:\n" + "\n".join(lines)
+            return _format_price_alerts(convex, user_id)
 
         # Resolve asset
         asset = convex.query("assets:getAssetByTickerOrName", {"query": asset_name})
@@ -508,20 +702,7 @@ async def manage_prediction_alert(
 
     try:
         if action == "list":
-            alerts = convex.query("predictionAlerts:getUserAlerts", {"user": user_id})
-            if not alerts:
-                return "You have no active prediction alerts."
-
-            lines = []
-            for alert in alerts:
-                event = convex.query("predictionEvents:getEvent", {"id": alert["event"]}) if alert.get("event") else None
-                label = event.get("title", "Unknown") if event else "Default"
-
-                period = "24h" if alert["alert_kind"] == "percentage_24h" else "7d"
-                threshold = alert.get("threshold_pct", 0)
-                lines.append(f"- {label}: {period} probability change exceeds {threshold:.0%}")
-
-            return "Your active prediction alerts:\n" + "\n".join(lines)
+            return _format_prediction_alerts(convex, user_id)
 
         # Resolve event: prefer slug lookup, fall back to search
         event = None
