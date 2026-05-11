@@ -8,7 +8,8 @@ Provides endpoints for:
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 
 from ..clients.convex_client import get_client
@@ -16,6 +17,11 @@ from ..clients.convex_client import get_client
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
+
+# Allowed values for the `types` query parameter on GET /watchlist/{user_id}.
+# Each value names a kind of watched entity, NOT a module — assets/events can
+# be relevant to multiple modules and we don't want to leak that abstraction.
+_VALID_WATCHLIST_TYPES = {"asset", "event"}
 
 
 # ============================================================================
@@ -46,15 +52,53 @@ class UpdateAssetStatusRequest(BaseModel):
 # ============================================================================
 
 @router.get("/{user_id}")
-async def get_watchlist(user_id: str):
-    """Get all watchlist items for a user (stated + inferred watches)."""
+async def get_watchlist(
+    user_id: str,
+    types: Optional[str] = Query(
+        default=None,
+        description=(
+            "Comma-separated list of watchlist types to include. "
+            "Allowed values: 'asset', 'event'. Defaults to all types."
+        ),
+        examples=["asset", "event", "asset,event"],
+    ),
+):
+    """Get the user's watchlist(s) for stated + inferred watches.
+
+    The response always uses keyed sub-collections — `assets` for cryptocurrency
+    watches (via `portfolioItems`) and `events` for prediction-event watches
+    (via `watchlistEvents`). Only the requested types are populated.
+    """
+    # Parse + validate the `types` query parameter. Default to all valid types.
+    if types is None:
+        requested = set(_VALID_WATCHLIST_TYPES)
+    else:
+        requested = {t.strip().lower() for t in types.split(",") if t.strip()}
+        invalid = requested - _VALID_WATCHLIST_TYPES
+        if invalid or not requested:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Invalid watchlist type(s): {sorted(invalid) or 'none provided'}. "
+                    f"Valid values: {sorted(_VALID_WATCHLIST_TYPES)}."
+                ),
+            )
+
     try:
         convex_client = get_client()
-        items = convex_client.query("portfolioItems:getWatchlist", {
-            "user": user_id,
-        })
-        return {"watchlist": items}
+        response: dict = {}
+        if "asset" in requested:
+            response["assets"] = convex_client.query(
+                "portfolioItems:getWatchlist", {"user": user_id}
+            ) or []
+        if "event" in requested:
+            response["events"] = convex_client.query(
+                "watchlistEvents:getWatchlistByUser", {"user": user_id}
+            ) or []
+        return response
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching watchlist: {e}", exc_info=True)
         raise HTTPException(

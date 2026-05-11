@@ -86,9 +86,11 @@ export const getUserCurrency = query({
 });
 
 /**
- * Create a new user profile
- * 
- * Throws error if profile already exists for this user
+ * Create or update a user profile (upsert).
+ *
+ * Profiles are now auto-created with growth-metric defaults inside
+ * `users.createUser`, so this mutation patches the existing profile rather
+ * than throwing. Any provided field overwrites the existing value.
  */
 export const createProfile = mutation({
   args: {
@@ -109,33 +111,21 @@ export const createProfile = mutation({
     preferred_currency: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const { user, ...rest } = args;
+
     const existingProfile = await ctx.db
       .query("profiles")
-      .withIndex("by_user", (q) => q.eq("user", args.user))
+      .withIndex("by_user", (q) => q.eq("user", user))
       .first();
 
     if (existingProfile !== null) {
-      throw new Error(
-        `Profile already exists for user "${args.user}"`
-      );
+      await ctx.db.patch(existingProfile._id, rest);
+      return await ctx.db.get(existingProfile._id);
     }
 
     const profileId = await ctx.db.insert("profiles", {
-      user: args.user,
-      country: args.country,
-      kyc_passed: args.kyc_passed,
-      age_group: args.age_group,
-      stated_investment_horizon: args.stated_investment_horizon,
-      stated_risk_appetite: args.stated_risk_appetite,
-      stated_investment_knowledge: args.stated_investment_knowledge,
-      stated_financial_goals: args.stated_financial_goals,
-      other_investments: args.other_investments,
-      inferred_investment_horizon: args.inferred_investment_horizon,
-      inferred_risk_appetite: args.inferred_risk_appetite,
-      inferred_investment_knowledge: args.inferred_investment_knowledge,
-      inferred_financial_goals: args.inferred_financial_goals,
-      inferred_investment_thesis: args.inferred_investment_thesis,
-      preferred_currency: args.preferred_currency,
+      user,
+      ...rest,
     });
 
     return await ctx.db.get(profileId);
@@ -144,7 +134,7 @@ export const createProfile = mutation({
 
 /**
  * Update an existing user profile
- * 
+ *
  * Only updates fields that are provided (partial update)
  */
 export const updateProfile = mutation({
@@ -164,6 +154,9 @@ export const updateProfile = mutation({
     inferred_financial_goals: v.optional(v.array(v.string())),
     inferred_investment_thesis: v.optional(v.string()),
     preferred_currency: v.optional(v.string()),
+    office_hours: v.optional(v.number()),
+    product_improvements: v.optional(v.number()),
+    referrals: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     let profile = await ctx.db
@@ -183,7 +176,7 @@ export const updateProfile = mutation({
     }
 
     const updates: any = {};
-    
+
     if (args.country !== undefined) updates.country = args.country;
     if (args.kyc_passed !== undefined) updates.kyc_passed = args.kyc_passed;
     if (args.age_group !== undefined) updates.age_group = args.age_group;
@@ -197,14 +190,14 @@ export const updateProfile = mutation({
       const existingGoals = profile.stated_financial_goals || [];
       const newGoals = args.stated_financial_goals || [];
       updates.stated_financial_goals = Array.from(
-        new Set([...existingGoals, ...newGoals])
+        new Set([...existingGoals, ...newGoals]),
       );
     }
     if (args.other_investments !== undefined) {
       const existingInvestments = profile.other_investments || [];
       const newInvestments = args.other_investments || [];
       updates.other_investments = Array.from(
-        new Set([...existingInvestments, ...newInvestments])
+        new Set([...existingInvestments, ...newInvestments]),
       );
     }
     if (args.inferred_investment_horizon !== undefined)
@@ -212,19 +205,41 @@ export const updateProfile = mutation({
     if (args.inferred_risk_appetite !== undefined)
       updates.inferred_risk_appetite = args.inferred_risk_appetite;
     if (args.inferred_investment_knowledge !== undefined)
-      updates.inferred_investment_knowledge = args.inferred_investment_knowledge;
+      updates.inferred_investment_knowledge =
+        args.inferred_investment_knowledge;
     if (args.inferred_financial_goals !== undefined) {
       // Merge with existing goals and deduplicate
       const existingGoals = profile.inferred_financial_goals || [];
       const newGoals = args.inferred_financial_goals || [];
       updates.inferred_financial_goals = Array.from(
-        new Set([...existingGoals, ...newGoals])
+        new Set([...existingGoals, ...newGoals]),
       );
     }
     if (args.inferred_investment_thesis !== undefined)
       updates.inferred_investment_thesis = args.inferred_investment_thesis;
     if (args.preferred_currency !== undefined)
       updates.preferred_currency = args.preferred_currency;
+
+    if (
+      args.office_hours !== undefined ||
+      args.product_improvements !== undefined
+    ) {
+      // Recompute contribution_score whenever an input field changes here.
+      // Note: `referrals` is owned by referralCodes.incrementReferrals, which
+      // recomputes the score itself. Any other writer of `referrals` must
+      // recompute the score too or it will go stale.
+      const referrals = profile.referrals || 0;
+      const officeHours =
+        args.office_hours !== undefined
+          ? args.office_hours
+          : profile.office_hours || 0;
+      const productImprovements =
+        args.product_improvements !== undefined
+          ? args.product_improvements
+          : profile.product_improvements || 0;
+      updates.contribution_score =
+        4.0 * referrals + 0.5 * officeHours + 2.0 * productImprovements;
+    }
 
     await ctx.db.patch(profile._id, updates);
 
