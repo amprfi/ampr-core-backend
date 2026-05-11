@@ -145,6 +145,7 @@ export const createUser = mutation({
     // Create a profile for the user with the referral code
     await ctx.db.insert("profiles", {
       user: userId,
+      kyc_passed: false,
       referral_code: referralCode,
       office_hours: 0,
       referrals: 0,
