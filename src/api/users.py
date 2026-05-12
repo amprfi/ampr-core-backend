@@ -4,7 +4,7 @@ import datetime
 from http import HTTPStatus
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from convex import ConvexError
 from src.clients.convex_client import get_client
 from ..models.user import User, UserResponse
@@ -14,6 +14,43 @@ from ..models.user_profile import UserProfile
 
 router = APIRouter()
 client = get_client()
+
+
+class ContributionUpdate(BaseModel):
+    office_hours: Optional[float] = Field(None, ge=0, description="New total office hours value")
+    product_improvements: Optional[float] = Field(None, ge=0, description="New total product improvements value")
+
+
+@router.put("/admin/users/{user_id}/contributions")
+async def update_contributions(
+    user_id: str, update: ContributionUpdate
+) -> Dict[str, Any]:
+    """
+    Admin endpoint to update a user's contribution fields.
+    Pass the new total value for office_hours and/or product_improvements.
+    The contribution_score is recalculated automatically by Convex.
+    """
+    if update.office_hours is None and update.product_improvements is None:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail={"error": "Must provide at least one of: office_hours, product_improvements"},
+        )
+
+    try:
+        args: Dict[str, Any] = {"user": user_id}
+        if update.office_hours is not None:
+            args["office_hours"] = update.office_hours
+        if update.product_improvements is not None:
+            args["product_improvements"] = update.product_improvements
+
+        updated_profile = client.mutation("profiles:updateProfile", args)
+        return updated_profile
+    except ConvexError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e.data)})
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail={"error": str(e)}
+        )
 
 
 @router.get("/users")

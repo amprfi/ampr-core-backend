@@ -140,7 +140,7 @@ export const createUser = mutation({
     });
 
     // Generate a referral code for the new user
-    const referralCode = await generateUniqueReferralCode(ctx);
+    const referralCode = await generateUniqueReferralCode(ctx, args.first_name, args.last_name);
 
     // Create a profile for the user with the referral code
     await ctx.db.insert("profiles", {
