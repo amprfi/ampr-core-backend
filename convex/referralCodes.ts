@@ -6,17 +6,17 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 const CHARACTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 /**
- * Generates a referral code with random characters
- * Format: AA-BBBB (two letters, hyphen, four letters)
+ * Generates a referral code using initials when available
+ * Format: AA-BBBB (first two from initials, hyphen, four random)
  */
-function generateRandomCode(): string {
-  // Generate first two characters
+function generateRandomCode(firstName?: string, lastName?: string): string {
+  // First two characters: initials if available, otherwise random
   let firstPart = "";
-  for (let i = 0; i < 2; i++) {
-    firstPart += CHARACTERS.charAt(
-      Math.floor(Math.random() * CHARACTERS.length),
-    );
-  }
+  const firstInitial = firstName?.trim()?.[0]?.toUpperCase();
+  const lastInitial = lastName?.trim()?.[0]?.toUpperCase();
+
+  firstPart += firstInitial || CHARACTERS.charAt(Math.floor(Math.random() * CHARACTERS.length));
+  firstPart += lastInitial || CHARACTERS.charAt(Math.floor(Math.random() * CHARACTERS.length));
 
   // Generate last four characters
   let secondPart = "";
@@ -50,12 +50,14 @@ async function isReferralCodeUnique(
  */
 export async function generateUniqueReferralCode(
   ctx: MutationCtx,
+  firstName?: string,
+  lastName?: string,
 ): Promise<string> {
   let attempts = 0;
   const maxAttempts = 10;
 
   while (attempts < maxAttempts) {
-    const code = generateRandomCode();
+    const code = generateRandomCode(firstName, lastName);
     const normalizedCode = code.toUpperCase();
     if (await isReferralCodeUnique(ctx, normalizedCode)) {
       return normalizedCode;

@@ -86,6 +86,31 @@ export const getUserCurrency = query({
 });
 
 /**
+ * Get user's contribution score with breakdown
+ */
+export const getContributionScore = query({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const profile = await ctx.db
+      .query("profiles")
+      .withIndex("by_user", (q) => q.eq("user", args.userId))
+      .unique();
+
+    if (!profile) {
+      return null;
+    }
+
+    return {
+      contribution_score: profile.contribution_score || 0,
+      referrals: profile.referrals || 0,
+      office_hours: profile.office_hours || 0,
+      product_improvements: profile.product_improvements || 0,
+      referral_code: profile.referral_code || null,
+    };
+  },
+});
+
+/**
  * Create or update a user profile (upsert).
  *
  * Profiles are now auto-created with growth-metric defaults inside
@@ -219,6 +244,9 @@ export const updateProfile = mutation({
       updates.inferred_investment_thesis = args.inferred_investment_thesis;
     if (args.preferred_currency !== undefined)
       updates.preferred_currency = args.preferred_currency;
+
+    if (args.office_hours !== undefined) updates.office_hours = args.office_hours;
+    if (args.product_improvements !== undefined) updates.product_improvements = args.product_improvements;
 
     if (
       args.office_hours !== undefined ||

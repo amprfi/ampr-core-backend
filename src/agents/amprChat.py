@@ -787,6 +787,40 @@ async def manage_prediction_alert(
 
 
 @agent.tool
+async def get_contribution_score(ctx: RunContext[TalkerContext]) -> str:
+    """
+    Get the user's contribution score with a breakdown of how it was calculated.
+    Call this when the user asks about their contribution score, points, or how they've contributed.
+    """
+    logger.info(f"Tool called: get_contribution_score for user_id={ctx.deps.user_id}")
+    try:
+        result = ctx.deps.convex_client.query("profiles:getContributionScore", {
+            "userId": ctx.deps.user_id
+        })
+        if not result:
+            return "No contribution score found for this user."
+
+        score = result["contribution_score"]
+        referrals = result["referrals"]
+        office_hours = result["office_hours"]
+        product_improvements = result["product_improvements"]
+        referral_code = result.get("referral_code", "N/A")
+
+        lines = [
+            f"Contribution score: {score}",
+            f"Breakdown: {referrals} referral(s) × 4 + {office_hours} office hour(s) × 0.5 + {product_improvements} product improvement(s) × 2 = {score}",
+        ]
+        if referral_code and referral_code != "N/A":
+            lines.append(f"Referral code: {referral_code}")
+
+        return "\n".join(lines)
+    except Exception as e:
+        error_msg = f"Error retrieving contribution score: {str(e)}"
+        logger.error(f"Tool error: get_contribution_score - {error_msg}")
+        return error_msg
+
+
+@agent.tool
 async def update_user_profile(
     ctx: RunContext[TalkerContext],
     country_name: Optional[str] = None,
