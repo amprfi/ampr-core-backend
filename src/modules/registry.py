@@ -210,8 +210,15 @@ class ModuleRegistry:
         if not module:
             raise Exception(f"Module '{name}' not found in registry")
 
+        # Strip the &trigger from the message so modules receive a clean query
+        trigger = self.metadata.get(name, {}).get("trigger")
+        if trigger:
+            clean_message = message.replace(trigger, "").strip()
+        else:
+            clean_message = message
+
         logger.info(f"Invoking module: {name}")
-        return await module.invoke(message, date_context=date_context, user_id=user_id)
+        return await module.invoke(clean_message, date_context=date_context, user_id=user_id)
 
     def list_modules(self) -> List[Dict[str, str]]:
         """

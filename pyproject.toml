@@ -43,3 +43,11 @@ pytest = "^8.4.1"
 [tool.pyright]
 venvPath = "/home/cgeorgen/.cache/pypoetry/virtualenvs"
 venv = "ampr-core-backend-xqTO7KpO-py3.10"
+
+[tool.ampr]
+# Short, human-readable summary of what shipped in the current `[project].version`.
+# Surfaced by the amprChat `get_help_overview` tool. Leave empty to omit the line.
+latest_update_summary = "Included various bug fixes and shipped educational modules and games"
+# URL pointing to release notes / changelog for the current version.
+# Surfaced as a clickable link in `get_help_overview`. Leave empty to omit the link.
+latest_update_link = "https://ampersand.featurebase.app/changelog/update-1-or-ampr-0"
