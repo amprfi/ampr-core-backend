@@ -6,6 +6,7 @@ import {
   InvestmentKnowledge,
   RiskAppetite,
 } from "./tables/profiles";
+import { generateUniqueReferralCode } from "./referralCodes";
 
 /**
  * Get profile by user ID
@@ -107,6 +108,48 @@ export const getContributionScore = query({
       product_improvements: profile.product_improvements || 0,
       referral_code: profile.referral_code || null,
     };
+  },
+});
+
+/**
+ * Ensure a profile exists for the given user.
+ *
+ * If the user already has a profile, return it. Otherwise create one with
+ * growth-metric defaults and a referral code. This is the safety net for
+ * users whose profile was never created (e.g. created before the profile
+ * insertion code was added to createUser).
+ */
+export const ensureProfile = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("profiles")
+      .withIndex("by_user", (q) => q.eq("user", args.userId))
+      .unique();
+
+    if (existing) {
+      return existing;
+    }
+
+    // Need to look up the user for referral code generation
+    const user = await ctx.db.get(args.userId);
+    const referralCode = await generateUniqueReferralCode(
+      ctx,
+      user?.first_name,
+      user?.last_name,
+    );
+
+    const profileId = await ctx.db.insert("profiles", {
+      user: args.userId,
+      kyc_passed: false,
+      referral_code: referralCode,
+      office_hours: 0,
+      referrals: 0,
+      product_improvements: 0,
+      contribution_score: 0,
+    });
+
+    return await ctx.db.get(profileId);
   },
 });
 

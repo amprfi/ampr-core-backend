@@ -222,6 +222,17 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         user, chat_data = await db_fetch_task
         needs_onboarding = user and not user.get("onboarding_complete")
 
+        # Ensure the user has a profile (auto-creates with defaults if missing).
+        # Awaits so that any subsequent tool call reading the profile will find it.
+        if user:
+            try:
+                await context.async_convex_client.mutation(
+                    "profiles:ensureProfile",
+                    {"userId": context.user_id},
+                )
+            except Exception as e:
+                logger.warning(f"ensureProfile failed for user {context.user_id}: {e}")
+
         # Process Summaries (Oldest to Newest)
         summaries_list = []
         if chat_data.get("summaries"):
