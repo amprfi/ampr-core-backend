@@ -798,7 +798,7 @@ async def get_contribution_score(ctx: RunContext[TalkerContext]) -> str:
             "userId": ctx.deps.user_id
         })
         if not result:
-            return "No contribution score found for this user."
+            return "This user does not have a contribution score yet. Tell them they can earn points through referrals (4 pts each), office hours (0.5 pts each), and product improvements (2 pts each). Do not invent a score or rank."
 
         score = result["contribution_score"]
         referrals = result["referrals"]
