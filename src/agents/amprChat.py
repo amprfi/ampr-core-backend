@@ -66,9 +66,12 @@ async def get_user_country_tool(ctx: RunContext[TalkerContext]) -> str:
         result = ctx.deps.convex_client.query("profiles:getUserCountry", {
             "userId": ctx.deps.user_id
         })
-        country = result.get("country") if result else "Unknown"
-        logger.info(f"Tool result: get_user_country_tool returned '{country}'")
-        return country
+        if result and result.get("country"):
+            country = result["country"]
+            logger.info(f"Tool result: get_user_country_tool returned '{country}'")
+            return country
+        logger.info("Tool result: get_user_country_tool returned 'no country set'")
+        return "No country set on profile"
     except Exception as e:
         error_msg = f"Error retrieving country: {str(e)}"
         logger.error(f"Tool error: get_user_country_tool - {error_msg}")
