@@ -95,6 +95,37 @@ async def get_all_users() -> List[Dict[str, Any]]:
     return users
 
 
+class MessageSearchRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=200, description="Word or phrase to search for in all messages")
+    limit: int = Field(50, ge=1, le=200, description="Maximum number of results to return")
+    role: str = Field("user", description="Filter by role: 'user', 'assistant', or 'any'")
+
+
+@router.post("/admin/messages/search")
+async def search_messages(request: MessageSearchRequest) -> List[Dict[str, Any]]:
+    """
+    Admin endpoint to search all messages for a keyword.
+
+    Useful for finding users who mentioned their name (or other info)
+    in conversations before the system was able to capture it.
+
+    Returns matching messages enriched with the owning user's ID and name.
+    """
+    try:
+        results = client.query("messages:searchMessages", {
+            "keyword": request.keyword,
+            "limit": request.limit,
+            "role": request.role,
+        })
+        return results
+    except ConvexError as e:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e.data)})
+    except Exception as e:
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail={"error": str(e)}
+        )
+
+
 ...
 
 

@@ -3,6 +3,75 @@ import { mutation, query } from "./_generated/server";
 import { MessageStatus, Channel } from "./tables/messaging";
 
 /**
+ * Search all messages for a keyword (admin utility).
+ *
+ * Uses the full-text search index on the messages table.
+ * Returns matching messages enriched with the owning user's name
+ * and the chat owner (user ID) so the caller can identify who
+ * sent each message.
+ *
+ * Results are limited to `limit` matches (default 50, max 200)
+ * and filtered to `role` "user" only (assistant messages are
+ * excluded by default). Pass `role: "any"` to include all roles.
+ */
+export const searchMessages = query({
+  args: {
+    keyword: v.string(),
+    limit: v.optional(v.number()),
+    role: v.optional(v.string()), // "user" (default), "assistant", or "any"
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(args.limit ?? 50, 200);
+    const filterRole = args.role ?? "user";
+
+    const results = await ctx.db
+      .query("messages")
+      .withSearchIndex("search_content", (q) => q.search("content", args.keyword))
+      .collect();
+
+    // Apply role filter
+    const filtered =
+      filterRole === "any"
+        ? results
+        : results.filter((m) => m.role === filterRole);
+
+    // Enrich with user info and take up to `limit`
+    const enriched: Array<Record<string, unknown>> = [];
+    for (const msg of filtered) {
+      if (enriched.length >= limit) break;
+
+      // Look up the chat to find the owner (user)
+      const chat = await ctx.db.get(msg.chat);
+      let owner: string | null = null;
+      let userName: string | null = null;
+      if (chat) {
+        owner = chat.owner as unknown as string;
+        const user = await ctx.db.get(chat.owner);
+        if (user) {
+          const first = (user as Record<string, unknown>).first_name as string | undefined;
+          const last = (user as Record<string, unknown>).last_name as string | undefined;
+          userName = [first, last].filter(Boolean).join(" ") || null;
+        }
+      }
+
+      enriched.push({
+        _id: msg._id,
+        _creationTime: msg._creationTime,
+        role: msg.role,
+        channel: msg.channel,
+        content: msg.content,
+        status: msg.status,
+        chatId: msg.chat,
+        owner,
+        userName,
+      });
+    }
+
+    return enriched;
+  },
+});
+
+/**
  * Create a message and auto-create chat if needed
  * 
  * This mutation:
