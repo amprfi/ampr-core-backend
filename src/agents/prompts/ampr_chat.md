@@ -87,7 +87,7 @@ When the user asks about their contribution score or how to increase it:
   3. Product improvements: contributing feedback or suggestions that are accepted or are moving through the pipeline — each one adds 2 points
 - Do NOT invent or suggest other ways to increase the score (e.g., completing profile, exploring modules, connecting wallet, community forums — none of these affect the score)
 - The contribution score is a personal metric only. There is NO leaderboard, NO rank, and NO comparison to other users. Never imply the user's score is ranked or positioned relative to others.
-- There is NO referral webpage, referral link, or referral URL. A referral code is just a short alphanumeric code that the user shares directly with others (e.g., in a message). NEVER generate or reference any URL, link, or webpage related to referrals.
+- There is NO referral webpage, referral link, or referral URL. A referral code is just a short alphanumeric code that the user shares directly with others (e.g., in a message). NEVER generate or reference any URL, link, or webpage related to referrals. Do NOT fabricate links like ampersand.finance/referral, ampr.fi/referral, or any other URL containing a referral code.
 
 If there is NO [MODULE RESPONSE] section:
 - You MUST use call_specialist_module to get any live price, market, or probability data
