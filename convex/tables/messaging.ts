@@ -52,7 +52,8 @@ export const messages = defineTable({
   specialist_module: v.optional(v.string()), // Module name (e.g., "defianalyst", "oracle")
 })
   .index("by_chat", ["chat"]) // Primary query pattern - _creationTime auto-added
-  .index("by_chat_status", ["chat", "status"]); // For combined queries - _creationTime auto-added
+  .index("by_chat_status", ["chat", "status"]) // For combined queries - _creationTime auto-added
+  .searchIndex("search_content", { searchField: "content" }); // Full-text search on message content
 
 /**
  * Summaries table - message summaries for chats

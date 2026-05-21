@@ -801,7 +801,7 @@ async def get_contribution_score(ctx: RunContext[TalkerContext]) -> str:
             "userId": ctx.deps.user_id
         })
         if not result:
-            return "This user does not have a contribution score yet. Tell them they can earn points through referrals (4 pts each), office hours (0.5 pts each), and product improvements (2 pts each). Do not invent a score or rank."
+            return "This user does not have a contribution score yet. Tell them they can earn points through referrals (4 pts each), office hours (0.5 pts each), and product improvements (2 pts each). Do not invent a score or rank. There is NO referral webpage or referral link — a referral code is just a short code to share directly with others. NEVER generate or reference any URL or webpage for referrals."
 
         score = result["contribution_score"]
         referrals = result["referrals"]
