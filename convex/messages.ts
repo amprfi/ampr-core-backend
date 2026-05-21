@@ -24,16 +24,19 @@ export const searchMessages = query({
     const limit = Math.min(args.limit ?? 50, 200);
     const filterRole = args.role ?? "user";
 
-    const results = await ctx.db
+    // Over-fetch to account for role filtering, but cap to avoid
+    // blowing through Convex read limits on common keywords.
+    const fetchLimit = filterRole === "any" ? limit : limit * 3;
+    const raw = await ctx.db
       .query("messages")
       .withSearchIndex("search_content", (q) => q.search("content", args.keyword))
-      .collect();
+      .take(fetchLimit);
 
     // Apply role filter
     const filtered =
       filterRole === "any"
-        ? results
-        : results.filter((m) => m.role === filterRole);
+        ? raw
+        : raw.filter((m) => m.role === filterRole);
 
     // Enrich with user info and take up to `limit`
     const enriched: Array<Record<string, unknown>> = [];
