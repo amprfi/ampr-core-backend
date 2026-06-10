@@ -1,26 +1,23 @@
 """
-Watchlist API endpoints.
+Watchlist API endpoints (user-facing).
 
-Provides endpoints for:
-- Viewing a user's watchlist and portfolio
-- Adding/removing assets from watchlist
-- Managing assets
+All endpoints require Hanko authentication. User IDs are injected
+from the authenticated session — callers cannot specify arbitrary user IDs.
 """
 
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Depends, status
 from pydantic import BaseModel
 
+from src.middleware.auth import get_current_user_id
 from ..clients.convex_client import get_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
-# Allowed values for the `types` query parameter on GET /watchlist/{user_id}.
-# Each value names a kind of watched entity, NOT a module — assets/events can
-# be relevant to multiple modules and we don't want to leak that abstraction.
+# Allowed values for the `types` query parameter on GET /watchlist.
 _VALID_WATCHLIST_TYPES = {"asset", "event"}
 
 
@@ -30,19 +27,16 @@ _VALID_WATCHLIST_TYPES = {"asset", "event"}
 
 class AddToWatchlistRequest(BaseModel):
     """Request body for adding an asset to watchlist."""
-    user_id: str
     asset_id: str
 
 
 class RemoveFromWatchlistRequest(BaseModel):
     """Request body for removing an asset from watchlist."""
-    user_id: str
     asset_id: str
 
 
 class UpdateAssetStatusRequest(BaseModel):
     """Request body for updating asset status."""
-    user_id: str
     asset_id: str
     asset_status: str  # "pending inferred watch", "inferred watch", "stated watch", "owned"
 
@@ -51,9 +45,8 @@ class UpdateAssetStatusRequest(BaseModel):
 # WATCHLIST ENDPOINTS
 # ============================================================================
 
-@router.get("/{user_id}")
+@router.get("")
 async def get_watchlist(
-    user_id: str,
     types: Optional[str] = Query(
         default=None,
         description=(
@@ -62,14 +55,10 @@ async def get_watchlist(
         ),
         examples=["asset", "event", "asset,event"],
     ),
+    user_id: str = Depends(get_current_user_id),
 ):
-    """Get the user's watchlist(s) for stated + inferred watches.
-
-    The response always uses keyed sub-collections — `assets` for cryptocurrency
-    watches (via `portfolioItems`) and `events` for prediction-event watches
-    (via `watchlistEvents`). Only the requested types are populated.
-    """
-    # Parse + validate the `types` query parameter. Default to all valid types.
+    """Get the authenticated user's watchlist(s)."""
+    # Parse + validate the `types` query parameter
     if types is None:
         requested = set(_VALID_WATCHLIST_TYPES)
     else:
@@ -107,9 +96,9 @@ async def get_watchlist(
         )
 
 
-@router.get("/portfolio/{user_id}")
-async def get_portfolio(user_id: str):
-    """Get all portfolio items for a user (all statuses)."""
+@router.get("/portfolio")
+async def get_portfolio(user_id: str = Depends(get_current_user_id)):
+    """Get all portfolio items for the authenticated user."""
     try:
         convex_client = get_client()
         items = convex_client.query("portfolioItems:getPortfolioByUser", {
@@ -125,9 +114,9 @@ async def get_portfolio(user_id: str):
         )
 
 
-@router.get("/owned/{user_id}")
-async def get_owned_assets(user_id: str):
-    """Get owned assets for a user."""
+@router.get("/owned")
+async def get_owned_assets(user_id: str = Depends(get_current_user_id)):
+    """Get owned assets for the authenticated user."""
     try:
         convex_client = get_client()
         items = convex_client.query("portfolioItems:getOwnedAssets", {
@@ -144,17 +133,15 @@ async def get_owned_assets(user_id: str):
 
 
 @router.post("/add")
-async def add_to_watchlist(request: AddToWatchlistRequest):
-    """
-    Add an asset to a user's watchlist.
-    
-    If the asset was previously an inferred watch, upgrades to stated watch.
-    If already watched or owned, returns existing item.
-    """
+async def add_to_watchlist(
+    request: AddToWatchlistRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Add an asset to the authenticated user's watchlist."""
     try:
         convex_client = get_client()
         result = convex_client.mutation("portfolioItems:addToWatchlist", {
-            "user": request.user_id,
+            "user": user_id,
             "asset": request.asset_id,
         })
         return {"item": result}
@@ -168,16 +155,15 @@ async def add_to_watchlist(request: AddToWatchlistRequest):
 
 
 @router.post("/remove")
-async def remove_from_watchlist(request: RemoveFromWatchlistRequest):
-    """
-    Remove an asset from a user's watchlist.
-    
-    Cannot remove owned assets — only watches.
-    """
+async def remove_from_watchlist(
+    request: RemoveFromWatchlistRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Remove an asset from the authenticated user's watchlist."""
     try:
         convex_client = get_client()
         convex_client.mutation("portfolioItems:removeFromWatchlist", {
-            "user": request.user_id,
+            "user": user_id,
             "asset": request.asset_id,
         })
         return {"success": True}
@@ -191,12 +177,15 @@ async def remove_from_watchlist(request: RemoveFromWatchlistRequest):
 
 
 @router.post("/status")
-async def update_asset_status(request: UpdateAssetStatusRequest):
-    """Update the status of a portfolio item."""
+async def update_asset_status(
+    request: UpdateAssetStatusRequest,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Update the status of a portfolio item for the authenticated user."""
     try:
         convex_client = get_client()
         result = convex_client.mutation("portfolioItems:updateAssetStatus", {
-            "user": request.user_id,
+            "user": user_id,
             "asset": request.asset_id,
             "asset_status": request.asset_status,
         })
@@ -208,6 +197,3 @@ async def update_asset_status(request: UpdateAssetStatusRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         )
-
-
-

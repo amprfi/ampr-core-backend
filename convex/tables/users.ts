@@ -17,7 +17,9 @@ export const users = defineTable({
   telegram_id: v.optional(v.string()),
   onboarding_complete: v.optional(v.boolean()),
   default_notification_channel: v.optional(NotificationChannel),
+  hankoId: v.optional(v.string()),
 })
   .index("by_email", ["email"])
   .index("by_phone", ["phone"])
-  .index("by_telegram_id", ["telegram_id"]);
+  .index("by_telegram_id", ["telegram_id"])
+  .index("by_hankoId", ["hankoId"]);

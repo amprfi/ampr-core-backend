@@ -317,16 +317,11 @@ async def handle_rest_message(
 
         # Step 3: Generate AI response (which will also store the user message)
         try:
-            chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
-            if not chat:
-                logger.error(f"No chat found for user {user_id}")
-                raise ValueError(f"No chat found for user {user_id}")
-            chat_id = chat["_id"]
-
-            # Create response context
+            # chat_id is resolved by createMessage inside generate_ai_response,
+            # which auto-creates a period-specific chat if needed.
             response_context = ResponseContext(
                 message_content=message_content,
-                chat_id=chat_id,
+                chat_id=None,
                 channel="rest",
                 user_id=user_id,
                 convex_client=convex_client,
@@ -505,16 +500,11 @@ async def _process_inbound_message(request):
 
         # Step 3: Generate AI response (which will also store the user message)
         try:
-            chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
-            if not chat:
-                logger.error(f"No chat found for user {user_id}")
-                raise ValueError(f"No chat found for user {user_id}")
-            chat_id = chat["_id"]
-
-            # Create response context
+            # chat_id is resolved by createMessage inside generate_ai_response,
+            # which auto-creates a period-specific chat if needed.
             response_context = ResponseContext(
                 message_content=message_content,
-                chat_id=chat_id,
+                chat_id=None,
                 channel=channel,
                 user_id=user_id,
                 convex_client=convex_client,
@@ -731,14 +721,11 @@ async def _process_telegram_update(update: TelegramUpdate):
         user_id = user["_id"]
         logger.info(f"Found linked user: {user_id}")
         
-        # Get chat (will be auto-created by createMessage if it doesn't exist)
-        chat = convex_client.query("chats:getChatByUser", {"userId": user_id})
-        chat_id = chat["_id"] if chat else None
-        
-        # Generate AI response (handles both onboarding and regular chat)
+        # chat_id is resolved by createMessage inside generate_ai_response,
+        # which auto-creates a period-specific chat if needed.
         response_context = ResponseContext(
             message_content=message_text,
-            chat_id=chat_id,
+            chat_id=None,
             channel="telegram",
             user_id=user_id,
             convex_client=convex_client,

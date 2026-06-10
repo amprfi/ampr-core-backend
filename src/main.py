@@ -1,4 +1,6 @@
 from __future__ import annotations
+from dotenv import load_dotenv
+load_dotenv()
 
 import asyncio
 import logging
@@ -20,6 +22,9 @@ from .api import assets
 from .api import lenses
 from .api import oracle
 from .api import diagnostics
+from .api import admin
+from .api import chat
+from .middleware.auth import HankoAuthMiddleware
 from .clients.convex_client import get_client
 from .clients.async_convex_client import get_async_client
 from .notifications.queue_processor import get_queue_processor
@@ -131,6 +136,9 @@ async def lifespan(app: FastAPI):
 
 fast_api = FastAPI(lifespan=lifespan)
 
+# Add Hanko auth middleware first (runs before CORS)
+fast_api.add_middleware(HankoAuthMiddleware)
+
 # Set all CORS enabled origins.
 fast_api.add_middleware(
     CORSMiddleware,
@@ -139,6 +147,10 @@ fast_api.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+fast_api.include_router(admin.router, prefix="/api")
+
+fast_api.include_router(chat.router, prefix="/api")
 
 fast_api.include_router(users.router, prefix="/api")
 
@@ -161,6 +173,12 @@ fast_api.include_router(diagnostics.router, prefix="/api")
 @fast_api.get("/")
 async def root():
     return {"message": "Hello from Ampr"}
+
+
+@fast_api.get("/health")
+async def health():
+    """Health check endpoint - public, no auth required."""
+    return {"status": "ok"}
 
 async def retry_remote_module_registration(
     proxy: RemoteModuleProxy,
