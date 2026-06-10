@@ -148,13 +148,16 @@ async def lifespan(app: FastAPI):
 
 fast_api = FastAPI(lifespan=lifespan)
 
-# Middleware order matters — outermost first:
-# 1. Request logging (outermost — wraps everything, assigns request ID)
-# 2. CORS (must be before auth so preflight OPTIONS gets CORS headers)
-# 3. Hanko auth (innermost — validates session before route handler)
+# Middleware order — Starlette add_middleware is a stack: last added = outermost.
+# We want CORS outermost so it handles preflight OPTIONS before auth rejects it.
+#
+# 1st added: HankoAuth       (innermost — closest to route handler)
+# 2nd added: RequestLogging  (middle — captures timing + assigns request ID)
+# 3rd added: CORS            (outermost — handles preflight, adds CORS headers)
+fast_api.add_middleware(HankoAuthMiddleware)
 fast_api.add_middleware(RequestLoggingMiddleware)
 fast_api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-fast_api.add_middleware(HankoAuthMiddleware)
+# (CORS middleware registered above, as outermost)
 
 # (CORS middleware registered above, before auth)
 
