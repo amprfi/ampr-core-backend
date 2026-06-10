@@ -7,6 +7,12 @@ Provides:
 - Session validation via Hanko's /sessions/validate endpoint
 - Lazy user creation: creates Convex user on first authenticated request
 
+Token Extraction:
+- Session tokens are accepted via the 'hanko' cookie (web browsers)
+  or the Authorization: Bearer header (mobile / native clients)
+- Per Hanko docs: "Protected API requests must include the session token
+  either in a Cookie header or as a Bearer token in the Authorization header."
+
 Security Model:
 - All /api/* endpoints are protected by default (safety net)
 - Public endpoints must be explicitly excluded
@@ -32,7 +38,7 @@ async def validate_hanko_session(session_token: str) -> Tuple[str, Optional[str]
     Validate a Hanko session token with the Hanko API.
     
     Args:
-        session_token: The Hanko session JWT from the 'hanko' cookie
+        session_token: The Hanko session JWT (from 'hanko' cookie or Authorization: Bearer header)
         
     Returns:
         Tuple of (hanko_user_id, email) if valid
@@ -174,15 +180,46 @@ async def require_hanko_auth(request: Request) -> str:
         return request.state.hanko_user_id
 
     # Fallback: try to validate directly (for endpoints not behind middleware)
-    cookie = request.cookies.get("hanko")
-    if not cookie:
+    token = _extract_session_token(request)
+    if not token:
         raise HTTPException(
             status_code=401,
             detail="Authentication required"
         )
 
-    hanko_user_id, _ = await validate_hanko_session(cookie)
+    hanko_user_id, _ = await validate_hanko_session(token)
     return hanko_user_id
+
+
+def _extract_session_token(request: Request) -> Optional[str]:
+    """
+    Extract the Hanko session token from the request.
+
+    Checks the 'hanko' cookie first (web browsers), then falls back to
+    the Authorization: Bearer header (mobile / API clients).
+
+    Per Hanko docs: "Protected API requests must include the session token
+    either in a Cookie header or as a Bearer token in the Authorization header."
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        The session token string, or None if not found
+    """
+    # Prefer cookie (set automatically by Hanko Elements / Frontend SDK)
+    cookie = request.cookies.get("hanko")
+    if cookie:
+        return cookie
+
+    # Fall back to Authorization: Bearer header (mobile / native clients)
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[len("Bearer "):].strip()
+        if token:
+            return token
+
+    return None
 
 
 class HankoAuthMiddleware(BaseHTTPMiddleware):
@@ -236,23 +273,24 @@ class HankoAuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/api/"):
             return await call_next(request)
         
-        # Extract Hanko session cookie
-        cookie = request.cookies.get("hanko")
-        
-        if not cookie:
+        # Extract Hanko session token (cookie or Bearer header)
+        session_token = _extract_session_token(request)
+
+        if not session_token:
             logger.warning(
-                f"Unauthenticated request to {request.url.path} - no hanko cookie"
+                f"Unauthenticated request to {request.url.path} - "
+                "no hanko cookie or Authorization header"
             )
             return JSONResponse(
                 status_code=HTTP_401_UNAUTHORIZED,
                 content={"detail": "Authentication required"}
             )
-        
+
         # Validate the session and get Hanko user ID
         hanko_user_id: str
         email: Optional[str] = None
         try:
-            hanko_user_id, email = await validate_hanko_session(cookie)
+            hanko_user_id, email = await validate_hanko_session(session_token)
         except HTTPException as e:
             # Convert HTTPException to proper response
             return JSONResponse(
