@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query, Depends, status
 from pydantic import BaseModel
 
 from src.middleware.auth import get_current_user_id
+from src.middleware.logging import debug_detail
 from src.clients.convex_client import get_client
 from src.api.responses import generate_ai_response, ResponseContext
 
@@ -113,7 +114,7 @@ async def send_message(
             logger.error(f"Error generating AI response for web chat: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error generating response.",
+                detail=debug_detail(e),
             )
 
     else:
@@ -131,7 +132,7 @@ async def send_message(
             logger.error(f"Error storing app message: {e}", exc_info=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error storing message.",
+                detail=debug_detail(e),
             )
 
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from src.middleware.auth import get_current_user_id
 from ..clients.convex_client import get_client
+from ..middleware.logging import debug_detail
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ async def get_watchlist(
         logger.error(f"Error fetching watchlist: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=debug_detail(e),
         )
 
 
@@ -110,7 +111,7 @@ async def get_portfolio(user_id: str = Depends(get_current_user_id)):
         logger.error(f"Error fetching portfolio: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=debug_detail(e),
         )
 
 
@@ -128,7 +129,7 @@ async def get_owned_assets(user_id: str = Depends(get_current_user_id)):
         logger.error(f"Error fetching owned assets: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=debug_detail(e),
         )
 
 
@@ -150,7 +151,7 @@ async def add_to_watchlist(
         logger.error(f"Error adding to watchlist: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=debug_detail(e),
         )
 
 
@@ -172,7 +173,7 @@ async def remove_from_watchlist(
         logger.error(f"Error removing from watchlist: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=debug_detail(e),
         )
 
 
@@ -195,5 +196,5 @@ async def update_asset_status(
         logger.error(f"Error updating asset status: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail=debug_detail(e),
         )

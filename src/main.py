@@ -25,6 +25,7 @@ from .api import diagnostics
 from .api import admin
 from .api import chat
 from .middleware.auth import HankoAuthMiddleware
+from .middleware.logging import RequestIdFilter, RequestLoggingMiddleware
 from .clients.convex_client import get_client
 from .clients.async_convex_client import get_async_client
 from .notifications.queue_processor import get_queue_processor
@@ -38,11 +39,22 @@ from .agents.interest_expiration import get_interest_expiration_job
 from convex import ConvexClient
 
 # Configure logging for Railway/production
+_log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+_handler = logging.StreamHandler(sys.stdout)
+_handler.addFilter(RequestIdFilter())
+_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(levelname)-5s [req-%(request_id)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+))
+
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)]
+    level=getattr(logging, _log_level, logging.INFO),
+    handlers=[_handler],
 )
+
+# Quiet down noisy third-party loggers
+for _noisy in ("httpx", "httpcore", "urllib3", "convex"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -136,17 +148,15 @@ async def lifespan(app: FastAPI):
 
 fast_api = FastAPI(lifespan=lifespan)
 
-# Add Hanko auth middleware first (runs before CORS)
+# Middleware order matters — outermost first:
+# 1. Request logging (outermost — wraps everything, assigns request ID)
+# 2. CORS (must be before auth so preflight OPTIONS gets CORS headers)
+# 3. Hanko auth (innermost — validates session before route handler)
+fast_api.add_middleware(RequestLoggingMiddleware)
+fast_api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 fast_api.add_middleware(HankoAuthMiddleware)
 
-# Set all CORS enabled origins.
-fast_api.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# (CORS middleware registered above, before auth)
 
 fast_api.include_router(admin.router, prefix="/api")
 
@@ -211,9 +221,33 @@ async def retry_remote_module_registration(
 
 @fast_api.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
-    print(f"VALIDATION ERROR DETAILS: {exc.errors()}")
-    print(f"VALIDATION ERROR BODY: {exc.body}")
+    logger.warning("Validation error on %s: %s", request.url.path, exc.errors())
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors(), "body": exc.body},
+    )
+
+
+@fast_api.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """
+    Catch-all for unhandled exceptions that escape route handlers.
+
+    Logs the full traceback with the request ID so it can be correlated
+    in Railway logs. Returns a structured JSON response with the request ID.
+    """
+    logger.exception(
+        "Unhandled exception on %s %s",
+        request.method,
+        request.url.path,
+    )
+    from src.middleware.logging import request_id_ctx, _DEBUG_ERRORS
+    rid = request_id_ctx.get("-")
+    if _DEBUG_ERRORS:
+        detail = f"{type(exc).__name__}: {exc}"
+    else:
+        detail = "Internal server error."
+    return JSONResponse(
+        status_code=500,
+        content={"detail": detail, "request_id": rid},
     )
