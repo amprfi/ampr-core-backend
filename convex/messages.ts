@@ -75,14 +75,23 @@ export const searchMessages = query({
 });
 
 /**
- * Create a message and auto-create chat if needed
- * 
- * This mutation:
- * 1. Checks if user has an existing chat
- * 2. Creates a new chat if one doesn't exist
- * 3. Creates the message in the chat
- * 
- * Returns the created message with auto-generated _id and _creationTime
+ * Compute the current period string (YYYY-MM) from the current date.
+ */
+function currentPeriod(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+/**
+ * Create a message and auto-create a period-specific chat if needed.
+ *
+ * Routes messages to the correct (owner, channel, period) chat.
+ * If no matching chat exists, one is created automatically.
+ *
+ * Returns the created message with auto-generated _id and _creationTime.
+ * The returned object includes a `chat` field pointing to the chat ID.
  */
 export const createMessage = mutation({
   args: {
@@ -97,14 +106,24 @@ export const createMessage = mutation({
     specialist_module: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const period = currentPeriod();
+
+    // Find or create the period-specific chat
     let chat = await ctx.db
       .query("chats")
-      .withIndex("by_owner", (q) => q.eq("owner", args.userId))
+      .withIndex("by_owner_channel_period", (q) =>
+        q
+          .eq("owner", args.userId)
+          .eq("channel", args.channel)
+          .eq("period", period)
+      )
       .first();
 
     if (!chat) {
       const chatId = await ctx.db.insert("chats", {
         owner: args.userId,
+        channel: args.channel,
+        period,
       });
       chat = await ctx.db.get(chatId);
       if (!chat) {

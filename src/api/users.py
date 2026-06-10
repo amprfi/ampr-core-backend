@@ -1,172 +1,51 @@
+"""
+User API endpoints (user-facing).
+
+All endpoints require Hanko authentication via the middleware.
+User IDs are injected from the authenticated session — callers cannot
+specify arbitrary user IDs.
+"""
+
 from __future__ import annotations
 
-import datetime
 from http import HTTPStatus
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from typing import Dict, Any
+
+from fastapi import APIRouter, HTTPException, Depends
 from convex import ConvexError
+
 from src.clients.convex_client import get_client
-from ..models.user import User, UserResponse
+from src.middleware.auth import get_current_user_id
 from ..models.user_profile import UserProfile
 
 # ---------------------------------------------------------------- #
 
 router = APIRouter()
-client = get_client()
 
 
-class ContributionUpdate(BaseModel):
-    office_hours: Optional[float] = Field(None, ge=0, description="New total office hours value")
-    product_improvements: Optional[float] = Field(None, ge=0, description="New total product improvements value")
-
-
-@router.put("/admin/users/{user_id}/contributions")
-async def update_contributions(
-    user_id: str, update: ContributionUpdate
+@router.get("/users/me")
+async def get_current_user(
+    user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
-    """
-    Admin endpoint to update a user's contribution fields.
-    Pass the new total value for office_hours and/or product_improvements.
-    The contribution_score is recalculated automatically by Convex.
-    """
-    if update.office_hours is None and update.product_improvements is None:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"error": "Must provide at least one of: office_hours, product_improvements"},
-        )
-
-    try:
-        args: Dict[str, Any] = {"user": user_id}
-        if update.office_hours is not None:
-            args["office_hours"] = update.office_hours
-        if update.product_improvements is not None:
-            args["product_improvements"] = update.product_improvements
-
-        updated_profile = client.mutation("profiles:updateProfile", args)
-        return updated_profile
-    except ConvexError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e.data)})
-    except Exception as e:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail={"error": str(e)}
-        )
-
-
-@router.get("/users")
-async def get_user(
-    email: str = Query(None, max_length=50), phone: str = Query(None, max_length=20)
-) -> Dict[str, Any]:
-    # Require exactly one parameter
-    if email and phone:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"error": "Provide either email or phone, not both"},
-        )
-    
-    if not email and not phone:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"error": "Must provide either email or phone parameter"},
-        )
-    
-    if email:
-        user = client.query("users:getUserByEmail", {"email": email})
-        if not user:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail={"error": f"User with email '{email}' does not exist."},
-            )
-        return user
-    
-    # Must be phone at this point
-    user = client.query("users:getUserByPhone", {"phone": phone})
+    """Return the authenticated user's own record."""
+    client = get_client()
+    user = client.query("users:getUser", {"userId": user_id})
     if not user:
         raise HTTPException(
             status_code=HTTPStatus.NOT_FOUND,
-            detail={"error": f"User with phone '{phone}' does not exist."},
+            detail={"error": "User not found"},
         )
     return user
 
 
-@router.get("/users/all")
-async def get_all_users() -> List[Dict[str, Any]]:
-    users = client.query("users:getUsers", {})
-    return users
-
-
-class MessageSearchRequest(BaseModel):
-    keyword: str = Field(..., min_length=1, max_length=200, description="Word or phrase to search for in all messages")
-    limit: int = Field(50, ge=1, le=200, description="Maximum number of results to return")
-    role: str = Field("user", description="Filter by role: 'user', 'assistant', or 'any'")
-
-
-@router.post("/admin/messages/search")
-async def search_messages(request: MessageSearchRequest) -> List[Dict[str, Any]]:
-    """
-    Admin endpoint to search all messages for a keyword.
-
-    Useful for finding users who mentioned their name (or other info)
-    in conversations before the system was able to capture it.
-
-    Returns matching messages enriched with the owning user's ID and name.
-    """
-    try:
-        results = client.query("messages:searchMessages", {
-            "keyword": request.keyword,
-            "limit": request.limit,
-            "role": request.role,
-        })
-        return results
-    except ConvexError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e.data)})
-    except Exception as e:
-        raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail={"error": str(e)}
-        )
-
-
-...
-
-
-@router.post("/users", status_code=HTTPStatus.CREATED)
-async def post_user(user: User) -> Dict[str, Any]:
-    if user.first_name is None or user.last_name is None or user.email is None or user.phone is None:
-        raise HTTPException(
-            status_code=HTTPStatus.BAD_REQUEST,
-            detail={"error": "Missing required fields: first_name, last_name, email, phone"},
-        )
-
-    try:
-        created_user = client.mutation("users:createUser", {
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "email": user.email,
-            "phone": user.phone,
-        })
-    except ConvexError as e:
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail={"error": str(e.data)})
-    return created_user
-
-
-@router.post("/users/{user_id}/profile", status_code=HTTPStatus.CREATED)
+@router.post("/users/me/profile", status_code=HTTPStatus.CREATED)
 async def create_user_profile(
-    user_id: str, profile_data: UserProfile
+    profile_data: UserProfile,
+    user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
-    """
-    Create a user profile for the specified user.
-
-    Args:
-        user_id: The Convex ID of the user to create a profile for
-        profile_data: Profile data including country and KYC status
-
-    Returns:
-        The created profile with its ID
-
-    Raises:
-        HTTPException: If the user doesn't exist or if there's an error creating the profile
-    """
+    """Create a profile for the authenticated user."""
     try:
+        client = get_client()
         created_profile = client.mutation("profiles:createProfile", {
             "user": user_id,
             "country": profile_data.country or "",
@@ -191,14 +70,15 @@ async def create_user_profile(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail={"error": str(e)}
         )
 
-@router.put("/users/{user_id}/profile")
+
+@router.put("/users/me/profile")
 async def update_user_profile(
-    user_id: str, profile_data: UserProfile
+    profile_data: UserProfile,
+    user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
-    """
-    Update a user profile for the specified user.
-    """
+    """Update the authenticated user's profile."""
     try:
+        client = get_client()
         updated_profile = client.mutation("profiles:updateProfile", {
             "user": user_id,
             "country": profile_data.country,

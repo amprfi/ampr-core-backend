@@ -15,21 +15,29 @@ export const MessageStatus = v.union(
  */
 export const Channel = v.union(
   v.literal("sms"),
-  v.literal("rcs"),
-  v.literal("whatsapp"),
   v.literal("telegram"),
   v.literal("email"),
   v.literal("app"),
-  v.literal("rest")
+  v.literal("rest"),
+  v.literal("web"),
+  v.literal("execution")
 );
 
 /**
  * Chats table - conversation containers owned by users
+ *
+ * Each chat is scoped to a (owner, channel, period) tuple so that every
+ * user gets a separate conversation per channel per calendar month.
+ * Legacy chats created before this model have null channel/period and
+ * are not queried by the new index.
  */
 export const chats = defineTable({
   owner: v.id("users"),
+  channel: v.optional(v.string()),   // "sms", "telegram", "app", "web", "execution", etc.
+  period: v.optional(v.string()),    // "2025-06" — YYYY-MM format
 })
-  .index("by_owner", ["owner"]);
+  .index("by_owner", ["owner"])
+  .index("by_owner_channel_period", ["owner", "channel", "period"]);
 
 /**
  * Messages table - individual messages in chats

@@ -265,3 +265,99 @@ export const linkTelegramToUser = mutation({
     return user._id;
   },
 });
+
+/**
+ * Get user by Hanko ID
+ */
+export const getUserByHankoId = query({
+  args: { hankoId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("users")
+      .withIndex("by_hankoId", (q) => q.eq("hankoId", args.hankoId))
+      .unique();
+  },
+});
+
+/**
+ * Create or update a user from Hanko webhook data.
+ * 
+ * This handles both user.created and user.updated events from Hanko.
+ * If a user with the hankoId already exists, updates their email.
+ * If no user exists with the hankoId, creates a new user with the provided email.
+ * If a user exists with the email but not the hankoId, links the hankoId to that user.
+ */
+export const createOrUpdateUserFromHanko = mutation({
+  args: {
+    hankoId: v.string(),
+    email: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    // First, try to find existing user by hankoId
+    const existingByHankoId = await ctx.db
+      .query("users")
+      .withIndex("by_hankoId", (q) => q.eq("hankoId", args.hankoId))
+      .first();
+
+    if (existingByHankoId) {
+      // User exists with this hankoId, just update email if provided
+      if (args.email && existingByHankoId.email !== args.email) {
+        // Check if another user has this email
+        const existingByEmail = await ctx.db
+          .query("users")
+          .withIndex("by_email", (q) => q.eq("email", args.email))
+          .first();
+        
+        if (existingByEmail && existingByEmail._id !== existingByHankoId._id) {
+          throw new Error(
+            `Cannot update: email "${args.email}" is already registered to another user`
+          );
+        }
+        
+        await ctx.db.patch(existingByHankoId._id, {
+          email: args.email,
+        });
+      }
+      return existingByHankoId._id;
+    }
+
+    // No user with this hankoId, check if a user exists with this email
+    if (args.email) {
+      const existingByEmail = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", args.email))
+        .first();
+      
+      if (existingByEmail) {
+        // Link the hankoId to the existing user
+        await ctx.db.patch(existingByEmail._id, {
+          hankoId: args.hankoId,
+        });
+        return existingByEmail._id;
+      }
+    }
+
+    // Create a new user
+    const userId = await ctx.db.insert("users", {
+      hankoId: args.hankoId,
+      email: args.email,
+      onboarding_complete: false,
+    });
+
+    // Generate a referral code for the new user
+    const referralCode = await generateUniqueReferralCode(ctx);
+
+    // Create a profile for the user with the referral code
+    await ctx.db.insert("profiles", {
+      user: userId,
+      kyc_passed: false,
+      referral_code: referralCode,
+      office_hours: 0,
+      referrals: 0,
+      product_improvements: 0,
+      contribution_score: 0,
+    });
+
+    return userId;
+  },
+});
