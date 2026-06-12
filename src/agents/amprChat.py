@@ -51,7 +51,7 @@ class TalkerContext(BaseModel):
     currency_context: str = "display_currency: USD"
 
 agent = Agent(
-    "mistral:mistral-medium-latest",
+    "mistral:mistral-medium-3.5",
     deps_type=TalkerContext,
     output_type=str
 )

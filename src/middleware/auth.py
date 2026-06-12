@@ -252,7 +252,7 @@ class HankoAuthMiddleware(BaseHTTPMiddleware):
 
     # Path prefixes that bypass Hanko auth
     # - /api/admin/* — authenticated via X-Admin-Key dependency instead
-    # - /api/webhooks/* — external callbacks (Vonage, Telegram, etc.)
+    # - /api/webhooks/* — external callbacks (Telegram, etc.)
     EXCLUDED_PREFIXES = (
         "/api/admin/",
         "/api/webhooks/",

@@ -20,7 +20,6 @@ from ..agents.onboarding import get_onboarding_agent, OnboardingContext
 from ..agents.watchlist_inferrer import infer_watchlist
 from ..agents.currency_inferrer import infer_display_currency
 from ..modules.registry import get_module_registry
-from ..utils.formatting import strip_markdown
 from ..clients.async_convex_client import AsyncConvexClient, get_async_client
 
 # Set up logging
@@ -33,11 +32,10 @@ class ResponseContext:
     Attributes:
         message_content: The content of the user's message
         chat_id: The ID of the chat (optional, will be auto-created if None)
-        channel: The channel (sms, chat, telegram)
+        channel: The channel (telegram, app, web, rest, execution)
         user_id: The ID of the user
         convex_client: Sync Convex client (legacy, used by agents that still need it)
         async_convex_client: Async Convex client for non-blocking DB calls
-        phone_number: Optional phone number for SMS responses
         telegram_id: Optional Telegram chat ID for Telegram responses
     """
     def __init__(
@@ -47,7 +45,6 @@ class ResponseContext:
         channel: str,
         user_id: str,
         convex_client: ConvexClient,
-        phone_number: Optional[str] = None,
         telegram_id: Optional[str] = None
     ):
         self.message_content = message_content
@@ -56,7 +53,6 @@ class ResponseContext:
         self.user_id = user_id
         self.convex_client = convex_client
         self.async_convex_client = get_async_client()
-        self.phone_number = phone_number
         self.telegram_id = telegram_id
 
 async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
@@ -115,7 +111,6 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
         if context.message_content.strip().lower() == "&help":
             logger.info("Bare &help detected, returning canonical help overview without LLM")
             help_text = build_help_overview()
-            response_content = strip_markdown(help_text) if context.channel == "sms" else help_text
 
             await context.async_convex_client.mutation(
                 "messages:createMessage",
@@ -123,7 +118,7 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                     "userId": context.user_id,
                     "role": "assistant",
                     "channel": context.channel,
-                    "content": response_content,
+                    "content": help_text,
                 },
             )
 
@@ -131,13 +126,13 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
                 from ..clients.telegram_client import TelegramClient
                 telegram_client = TelegramClient()
                 # Match the chunking used elsewhere — one message per paragraph break.
-                telegram_chunks = [c.strip() for c in response_content.split("\n\n") if c.strip()]
+                telegram_chunks = [c.strip() for c in help_text.split("\n\n") if c.strip()]
                 for chunk in telegram_chunks:
                     await telegram_client.send_message(chat_id=int(context.telegram_id), text=chunk)
                 await telegram_client.close()
 
             logger.info(f"Stored AI response in database for chat {context.chat_id}")
-            return [response_content]
+            return [help_text]
 
         # --- PHASE 2: Immediately fire DB fetch + watchlist inference ---
 
@@ -389,10 +384,6 @@ async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
 
         # Store and send each message
         for response_content in response_messages:
-            # Strip markdown for plain-text channels (e.g. SMS)
-            if context.channel == "sms":
-                response_content = strip_markdown(response_content)
-
             # Store the assistant's response in the database
             message_data: dict = {
                 "userId": context.user_id,

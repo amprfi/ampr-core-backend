@@ -2,7 +2,7 @@
 
 **The world's first open financial operating system.**
 
-Ampersand combines a web3 wallet, an intelligent AI co-pilot (Ampr), and an app store of financial products, strategies, and agents — all accessible through an accessible user interface (*coming soon*) conversational interfaces like Telegram and SMS.
+Ampersand combines a web3 wallet, an intelligent AI co-pilot (Ampr), and an app store of financial products, strategies, and agents — all accessible through an accessible user interface (*coming soon*) conversational interfaces like Telegram.
 
 ---
 
@@ -59,7 +59,7 @@ Ampersand is a financial platform that brings together:
 | **AI Orchestration** | Pydantic AI |
 | **LLM Provider** | Mistral (mistral-large-latest) |
 | **Database** | Convex (relational + vector storage) |
-| **Messaging** | Telegram (aiogram) + Telynx Gateway |
+| **Messaging** | Telegram (aiogram) |
 | **Deployment** | Railway |
 | **Package Management** | Poetry (Python) / Bun (TypeScript for Convex) |
 
@@ -78,7 +78,7 @@ ampr-core-backend/
 │   │   └── summarizer.py    # Conversation summarization
 │   │
 │   ├── api/                 # FastAPI route handlers
-│   │   ├── webhooks.py      # Telegram & Vonage webhook handlers
+│   │   ├── webhooks.py      # Telegram webhook handlers
 │   │   ├── users.py         # User management endpoints
 │   │   ├── notifications.py # Notification endpoints
 │   │   ├── countries.py     # Country data endpoints
@@ -144,7 +144,6 @@ Extensible architecture for specialized agents:
 
 Processes incoming messages from:
 - **Telegram**: Bot updates, inline keyboards, contact sharing
-- **Telynx SMS**: Inbound messages with JWT signature verification
 - **REST API**: Local development endpoint (no auth)
 
 ---
@@ -207,10 +206,6 @@ MISTRAL_API_KEY=your-mistral-key
 TELEGRAM_BOT_TOKEN=your-bot-token
 TELEGRAM_WEBHOOK_SECRET=your-webhook-secret
 
-# Vonage SMS
-VONAGE_API_KEY=your-api-key
-VONAGE_SIGNATURE_SECRET=your-signature-secret
-
 # CoinGecko (for DeFi Analyst module)
 COINGECKO_API_KEY=your-coingecko-key
 ```
@@ -246,10 +241,7 @@ web: poetry run uvicorn src.main:fast_api --host 0.0.0.0 --port $PORT
 |--------|----------|-------------|
 | `GET` | `/` | Health check |
 | `POST` | `/api/webhooks/telegram` | Telegram bot updates |
-| `POST` | `/api/webhooks/inbound-message` | Vonage SMS (POST) |
-| `GET` | `/api/webhooks/inbound-message` | Vonage SMS (GET) |
 | `POST` | `/api/webhooks/rest-message` | Local dev endpoint |
-| `POST` | `/api/webhooks/message-status` | Vonage delivery status |
 | `*` | `/api/users/*` | User management |
 | `*` | `/api/notifications/*` | Notification management |
 | `*` | `/api/countries/*` | Country data |

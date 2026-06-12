@@ -4,7 +4,7 @@ Notification service for sending notifications through the chat system.
 Central API for:
 - Checking user preferences
 - Timezone-aware delivery windows
-- Routing to appropriate channel (Telegram, SMS)
+- Routing to appropriate channel (Telegram)
 - Queueing notifications for delayed delivery
 """
 import logging
@@ -14,7 +14,6 @@ from convex import ConvexClient
 
 from .timezone import get_timezone_utils
 from ..clients.telegram_client import TelegramClient
-from ..utils.formatting import strip_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -166,12 +165,6 @@ class NotificationService:
                 delivery_success = await self._send_telegram(telegram_id, content)
             else:
                 logger.warning(f"User {user_id} has telegram channel but no telegram_id")
-        elif channel == "sms":
-            phone = user.get("phone")
-            if phone:
-                delivery_success = await self._send_sms(phone, content)
-            else:
-                logger.warning(f"User {user_id} has sms channel but no phone")
         
         if not delivery_success:
             logger.error(f"Failed to deliver notification to user {user_id} via {channel}")
@@ -233,12 +226,7 @@ class NotificationService:
             logger.error(f"Telegram send failed: {e}")
             return False
     
-    async def _send_sms(self, phone: str, content: str) -> bool:
-        """Send message via SMS (placeholder for Vonage integration)."""
-        content = strip_markdown(content)
-        # TODO: Implement SMS sending via Vonage
-        logger.warning("SMS sending not yet implemented")
-        return False
+
 
 
 _service_instance: Optional[NotificationService] = None

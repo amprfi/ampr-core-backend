@@ -18,7 +18,7 @@ class OnboardingContext(BaseModel):
 
 
 agent = Agent(
-    "mistral:mistral-medium-latest", deps_type=OnboardingContext, output_type=str
+    "mistral:mistral-medium-3.5", deps_type=OnboardingContext, output_type=str
 )
 
 

@@ -1,13 +1,13 @@
 """
-Vonage webhook router for handling incoming SMS messages.
+Webhook router for handling incoming messages from external services.
 
-This module provides endpoints for receiving and processing Vonage webhooks,
-including inbound messages and message status updates.
+This module provides endpoints for:
+- Telegram webhook updates
+- Local REST API endpoint for development/testing
 
 Temporary Local REST Endpoint:
 ---------------------------------
-For local development/testing when Vonage is unavailable, a temporary endpoint
-is available at POST /webhooks/rest-message.
+For local development/testing, a temporary endpoint is available at POST /webhooks/rest-message.
 
 This endpoint:
 - Bypasses all authentication (for local use only)
@@ -17,7 +17,6 @@ This endpoint:
     "from_number": "sender phone number",
     "to_number": "recipient phone number"
   }
-- Uses the same processing pipeline as Vonage messages but with direct AI response capture
 - Returns both a success message and the generated AI response
 - Should NOT be used in production
 
@@ -29,18 +28,12 @@ Example response format:
 }
 """
 
-import asyncio
-import os
 import logging
 import time
-import traceback
 import uuid
 import datetime
-from typing import Optional, Dict, Any, Set
-from fastapi import APIRouter, Request, HTTPException, status, Depends, Query
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-import jwt
-from jwt.exceptions import InvalidTokenError
+from typing import Optional, Dict, Any
+from fastapi import APIRouter, Request, HTTPException, status
 from pydantic import BaseModel
 import json
 from aiogram.types import Update as TelegramUpdate
@@ -55,9 +48,6 @@ from ..config.telegram_config import get_telegram_webhook_secret
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
-
-# Security scheme for bearer token
-security = HTTPBearer()
 
 # Telegram update_id deduplication
 _seen_update_ids: Dict[int, float] = {}
@@ -77,23 +67,6 @@ def _is_duplicate_update(update_id: int) -> bool:
     _seen_update_ids[update_id] = now
     return False
 
-class WebhookPayload(BaseModel):
-    """Base model for webhook payloads"""
-    pass
-
-class InboundMessagePayload(WebhookPayload):
-    """
-    Model for inbound message webhook payload from Vonage.
-    Matches the structure of Vonage Messages API webhooks.
-    """
-    message_uuid: str
-    to: Dict[str, str]
-    from_: Dict[str, str]  # 'from' is a reserved word in Python
-    timestamp: str
-    text: str
-    channel: str
-    message_type: str
-    conversation_id: Optional[str] = None
 
 class RestMessagePayload(BaseModel):
     """
@@ -104,99 +77,6 @@ class RestMessagePayload(BaseModel):
     from_number: str
     to_number: str
 
-def get_vonage_api_key() -> str:
-    """Get Vonage API key from environment variables"""
-    api_key = os.getenv("VONAGE_API_KEY")
-    if not api_key:
-        raise ValueError("VONAGE_API_KEY environment variable is not set")
-    return api_key
-
-def get_vonage_signature_secret() -> str:
-    """Get Vonage signature secret from environment variables"""
-    secret = os.getenv("VONAGE_SIGNATURE_SECRET")
-    if not secret:
-        raise ValueError("VONAGE_SIGNATURE_SECRET environment variable is not set")
-    return secret
-
-def verify_webhook_signature(token: str, signature_secret: str) -> bool:
-    """
-    Verify the JWT signature from Vonage webhook.
-
-    Args:
-        token: The JWT token from the Authorization header
-        signature_secret: The signature secret from environment variables
-
-    Returns:
-        bool: True if signature is valid, False otherwise
-    """
-    try:
-        # Decode the token without verification to get the header
-        header = jwt.get_unverified_header(token)
-
-        # Verify the token with the signature secret
-        decoded = jwt.decode(
-            token,
-            signature_secret,
-            algorithms=[header.get("alg", "HS256")]
-        )
-
-        # Verify the issuer is Vonage
-        if decoded.get("iss") != "Vonage":
-            logger.error("Invalid issuer in JWT token")
-            return False
-
-        return True
-    except InvalidTokenError as e:
-        logger.error(f"Invalid token: {str(e)}")
-        return False
-    except Exception as e:
-        logger.error(f"Error verifying token: {str(e)}")
-        return False
-
-async def get_webhook_credentials(
-    request: Request
-) -> HTTPAuthorizationCredentials:
-    """
-    Dependency to extract and validate webhook credentials.
-
-    Args:
-        request: The incoming request
-
-    Returns:
-        HTTPAuthorizationCredentials: The authorization credentials
-
-    Raises:
-        HTTPException: If authorization fails
-    """
-    try:
-        # Get the signature secret
-        signature_secret = get_vonage_signature_secret()
-
-        # Extract the token from the Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing or invalid Authorization header"
-            )
-
-        token = auth_header.split(" ")[1]
-
-        # Verify the signature
-        if not verify_webhook_signature(token, signature_secret):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid webhook signature"
-            )
-
-        return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-    except Exception as e:
-        logger.error(f"Webhook authentication failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {str(e)}"
-        )
 
 def normalize_phone_number(phone: str) -> str:
     """
@@ -221,25 +101,6 @@ def normalize_phone_number(phone: str) -> str:
 
     return normalized
 
-@router.post("/inbound-message", status_code=status.HTTP_200_OK)
-async def handle_inbound_message_post(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(get_webhook_credentials)
-):
-    """
-    Handle inbound SMS messages from Vonage using POST with JSON body.
-
-    Args:
-        request: The incoming request containing the message data
-        credentials: Validated webhook credentials
-
-    Returns:
-        dict: Success message
-
-    Raises:
-        HTTPException: If no user is found for the phone number
-    """
-    return await _process_inbound_message(request)
 
 @router.post("/rest-message", status_code=status.HTTP_200_OK)
 async def handle_rest_message(
@@ -260,312 +121,65 @@ async def handle_rest_message(
     """
     logger.warning("Using temporary local REST endpoint - no authentication")
 
-    # Create a mock request object with the expected JSON format
-    class MockRequest:
-        def __init__(self, data):
-            self._json = data
+    # Get the global Convex client
+    convex_client = get_client()
 
-        async def json(self):
-            return self._json
+    # Extract and normalize phone number
+    from_number = payload.from_number
+    normalized_phone = normalize_phone_number(from_number)
+    logger.info(f"Processing message from phone: {from_number}, normalized: {normalized_phone}")
 
-    # Convert payload to the format expected by _process_inbound_message
-    mock_request_data = {
-        "text": payload.text,
-        "from": {"number": payload.from_number},
-        "to": {"number": payload.to_number},
-        "message_uuid": "rest-" + str(uuid.uuid4()),  # Generate a unique ID
-        "timestamp": datetime.datetime.utcnow().isoformat(),
-        "channel": "rest",
-        "message_type": "text"
-    }
+    # Step 1: Get user ID by phone number
+    try:
+        logger.debug(f"Looking up user by phone: {normalized_phone}")
+        user = convex_client.query("users:getUserByPhone", {"phone": normalized_phone})
+        if not user:
+            raise ValueError(f"No user found for phone {normalized_phone}")
+        user_id = user["_id"]
+        logger.info(f"Found user with ID: {user_id}")
+    except Exception as e:
+        logger.error(f"No user found for phone {normalized_phone}: {e}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error(f"Error details: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No user found for phone number {normalized_phone}"
+        )
 
-    logger.info(f"Received local REST message: {json.dumps(mock_request_data, indent=2)}")
+    # Step 2: Get message content
+    message_content = payload.text
+    logger.info(f"Processing message for user {user_id}: {message_content}")
 
+    # Step 3: Generate AI response (which will also store the user message)
     # Create a container to capture the AI response
     ai_response_container: Dict[str, Optional[str]] = {"response": None}
 
-    # Create a custom processing function that captures the AI response
-    async def process_rest_message():
-        # Get the global Convex client
-        convex_client = get_client()
-
-        # Extract and normalize phone number
-        from_number = payload.from_number
-        normalized_phone = normalize_phone_number(from_number)
-        logger.info(f"Processing message from phone: {from_number}, normalized: {normalized_phone}")
-
-        # Step 1: Get user ID by phone number
-        try:
-            logger.debug(f"Looking up user by phone: {normalized_phone}")
-            user = convex_client.query("users:getUserByPhone", {"phone": normalized_phone})
-            if not user:
-                raise ValueError(f"No user found for phone {normalized_phone}")
-            user_id = user["_id"]
-            logger.info(f"Found user with ID: {user_id}")
-        except Exception as e:
-            logger.error(f"No user found for phone {normalized_phone}: {e}")
-            logger.error(f"Error type: {type(e)}")
-            logger.error(f"Error details: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No user found for phone number {normalized_phone}"
-            )
-
-        # Step 2: Get message content
-        message_content = payload.text
-        logger.info(f"Processing message for user {user_id}: {message_content}")
-
-        # Step 3: Generate AI response (which will also store the user message)
-        try:
-            # chat_id is resolved by createMessage inside generate_ai_response,
-            # which auto-creates a period-specific chat if needed.
-            response_context = ResponseContext(
-                message_content=message_content,
-                chat_id=None,
-                channel="rest",
-                user_id=user_id,
-                convex_client=convex_client,
-                phone_number=from_number
-            )
-
-            # Generate and capture AI response
-            response_messages = await generate_ai_response(response_context)
-            ai_response_container["response"] = response_messages
-            logger.info(f"Successfully generated AI response for REST message from {from_number}")
-
-        except Exception as e:
-            logger.error(f"Error generating AI response for REST message: {str(e)}", exc_info=True)
-            # Continue even if response generation fails
-
-        return {"status": "success", "message": "Inbound message processed"}
-
-    # Process the message and capture any exceptions
     try:
-        await process_rest_message()
-        return {
-            "status": "success",
-            "message": "Inbound message processed",
-            "ai_response": ai_response_container["response"]
-        }
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
+        # chat_id is resolved by createMessage inside generate_ai_response,
+        # which auto-creates a period-specific chat if needed.
+        response_context = ResponseContext(
+            message_content=message_content,
+            chat_id=None,
+            channel="rest",
+            user_id=user_id,
+            convex_client=convex_client,
+        )
+
+        # Generate and capture AI response
+        response_messages = await generate_ai_response(response_context)
+        ai_response_container["response"] = response_messages
+        logger.info(f"Successfully generated AI response for REST message from {from_number}")
+
     except Exception as e:
-        logger.error(f"Error processing REST message: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing message: {str(e)}"
-        )
+        logger.error(f"Error generating AI response for REST message: {str(e)}", exc_info=True)
+        # Continue even if response generation fails
 
-@router.get("/inbound-message", status_code=status.HTTP_200_OK)
-async def handle_inbound_message_get(request: Request):
-    """
-    Handle inbound SMS messages from Vonage using GET with query parameters.
-
-    This endpoint receives SMS messages from Vonage via GET request with query parameters,
-    validates the API key, finds the appropriate user for the sender's phone number,
-    and stores the message.
-
-    Args:
-        request: The incoming request containing query parameters
-
-    Returns:
-        dict: Success message
-
-    Raises:
-        HTTPException: If authentication fails or no user is found
-    """
-    # Get query parameters directly from request
-    query_params = request.query_params
-
-    # Extract required parameters
-    api_key = query_params.get("api-key")
-    messageId = query_params.get("messageId")
-    to = query_params.get("to")
-    text = query_params.get("text")
-    msisdn = query_params.get("msisdn")
-
-    # Extract optional parameters
-    keyword = query_params.get("keyword")
-    type = query_params.get("type")
-    message_timestamp = query_params.get("message-timestamp")
-
-    # Validate required parameters
-    if not all([api_key, messageId, to, text, msisdn]):
-        missing = []
-        if not api_key: missing.append("api-key")
-        if not messageId: missing.append("messageId")
-        if not to: missing.append("to")
-        if not text: missing.append("text")
-        if not msisdn: missing.append("msisdn")
-        logger.error(f"Missing required query parameters: {', '.join(missing)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Missing required parameters: {', '.join(missing)}"
-        )
-
-    # Validate API key
-    expected_api_key = get_vonage_api_key()
-    if api_key != expected_api_key:
-        logger.error(f"Invalid API key attempted: {api_key}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key"
-        )
-
-    # Create a mock request object with JSON body to reuse existing processing logic
-    class MockRequest:
-        def __init__(self, data):
-            self._json = data
-
-        async def json(self):
-            return self._json
-
-    # Convert query params to the expected JSON format
-    mock_request_data = {
-        "text": text,
-        "from": {"number": msisdn},
-        "to": {"number": to},
-        "message_uuid": messageId,
-        "timestamp": message_timestamp,
-        "channel": "sms",
-        "message_type": type or "text"
+    return {
+        "status": "success",
+        "message": "Inbound message processed",
+        "ai_response": ai_response_container["response"]
     }
 
-    logger.info(f"Received inbound message via GET: {json.dumps(mock_request_data, indent=2)}")
-
-    mock_request = MockRequest(mock_request_data)
-    return await _process_inbound_message(mock_request)
-
-async def _process_inbound_message(request):
-    """
-    Common processing logic for inbound messages (used by both GET and POST endpoints).
-
-    This function:
-    1. Extracts the phone number from the message
-    2. Uses the phone number to get the user ID
-    3. Creates a message in the database using the user ID
-
-    Args:
-        request: The request object (real or mock) containing message data
-
-    Returns:
-        dict: Success message
-
-    Raises:
-        HTTPException: If processing fails (no user found, etc.)
-    """
-    try:
-        # Parse the request data
-        data = await request.json()
-        logger.info(f"Processing inbound message: {json.dumps(data, indent=2)}")
-
-        # Validate required fields
-        if not data.get("text") or not data.get("from") or not data.get("from").get("number"):
-            logger.error("Missing required message fields in payload")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Missing required message fields"
-            )
-
-        # Get the global Convex client
-        convex_client = get_client()
-
-        # Extract and normalize phone number
-        from_number = data["from"]["number"]
-        normalized_phone = normalize_phone_number(from_number)
-        logger.info(f"Processing message from phone: {from_number}, normalized: {normalized_phone}")
-
-        # Step 1: Get user ID by phone number
-        try:
-            logger.debug(f"Looking up user by phone: {normalized_phone}")
-            user = convex_client.query("users:getUserByPhone", {"phone": normalized_phone})
-            if not user:
-                raise ValueError(f"No user found for phone {normalized_phone}")
-            user_id = user["_id"]
-            logger.info(f"Found user with ID: {user_id}")
-        except Exception as e:
-            logger.error(f"No user found for phone {normalized_phone}: {e}")
-            logger.error(f"Error type: {type(e)}")
-            logger.error(f"Error details: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No user found for phone number {normalized_phone}"
-            )
-
-        # Step 2: Get message content
-        message_content = data["text"]
-        channel = data.get("channel", "sms")
-        logger.info(f"Processing message for user {user_id}: {message_content}")
-
-        # Step 3: Generate AI response (which will also store the user message)
-        try:
-            # chat_id is resolved by createMessage inside generate_ai_response,
-            # which auto-creates a period-specific chat if needed.
-            response_context = ResponseContext(
-                message_content=message_content,
-                chat_id=None,
-                channel=channel,
-                user_id=user_id,
-                convex_client=convex_client,
-                phone_number=from_number
-            )
-
-            # Generate and send AI response
-            await generate_ai_response(response_context)
-            logger.info(f"Successfully generated and sent AI response from {from_number}")
-
-        except Exception as e:
-            logger.error(f"Error generating AI response for SMS: {str(e)}", exc_info=True)
-            # Continue even if response generation fails to ensure message is stored
-
-        return {"status": "success", "message": "Inbound message processed"}
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON payload: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid JSON payload"
-        )
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        logger.error(f"Error processing inbound message: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing message: {str(e)}"
-        )
-
-@router.post("/message-status", status_code=status.HTTP_200_OK)
-async def handle_message_status(
-    request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(get_webhook_credentials)
-):
-    """
-    Handle message status updates from Vonage.
-
-    Args:
-        request: The incoming request containing status data
-        credentials: Validated webhook credentials
-
-    Returns:
-        dict: Success message
-    """
-    try:
-        data = await request.json()
-        logger.info(f"Received message status: {json.dumps(data, indent=2)}")
-
-        # Here you would typically update the status of a previously sent message
-        # For now, we'll just log it
-        return {"status": "success", "message": "Message status processed"}
-
-    except Exception as e:
-        logger.error(f"Error processing message status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing status: {str(e)}"
-        )
 
 def verify_telegram_secret(request: Request) -> bool:
     """
@@ -617,6 +231,7 @@ async def handle_telegram_webhook(request: Request):
         return {"status": "ok"}
 
     # Return 200 immediately; process in background
+    import asyncio
     asyncio.create_task(_process_telegram_update(update))
     return {"status": "ok"}
 
