@@ -14,7 +14,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .api import users
-from .api import webhooks
+from .api import telegram_ingestion
+from .api import testing_ingestion
 from .api import notifications
 from .api import countries
 from .api import watchlist
@@ -167,7 +168,8 @@ fast_api.include_router(chat.router, prefix="/api")
 
 fast_api.include_router(users.router, prefix="/api")
 
-fast_api.include_router(webhooks.router, prefix="/api")
+fast_api.include_router(telegram_ingestion.router, prefix="/api")
+fast_api.include_router(testing_ingestion.router, prefix="/api")
 
 fast_api.include_router(notifications.router, prefix="/api")
 

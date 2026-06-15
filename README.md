@@ -78,7 +78,8 @@ ampr-core-backend/
 │   │   └── summarizer.py    # Conversation summarization
 │   │
 │   ├── api/                 # FastAPI route handlers
-│   │   ├── webhooks.py      # Telegram webhook handlers
+│   │   ├── telegram_ingestion.py  # Telegram webhook handlers
+│   │   ├── testing_ingestion.py   # Local REST testing endpoint
 │   │   ├── users.py         # User management endpoints
 │   │   ├── notifications.py # Notification endpoints
 │   │   ├── countries.py     # Country data endpoints
@@ -140,11 +141,11 @@ Extensible architecture for specialized agents:
   - Top gainers/losers across timeframes
 - Modules are triggered via `&mention` syntax (e.g., `&defianalyst what's bitcoin's price?`)
 
-### 4. Webhook Handlers (`src/api/webhooks.py`)
+### 4. Ingestion Modules
 
-Processes incoming messages from:
-- **Telegram**: Bot updates, inline keyboards, contact sharing
-- **REST API**: Local development endpoint (no auth)
+Processes incoming messages from external services:
+- **Telegram Ingestion** (`src/api/telegram_ingestion.py`): Bot updates, inline keyboards, contact sharing, account linking
+- **Testing Ingestion** (`src/api/testing_ingestion.py`): Local REST endpoint for development/testing (no auth)
 
 ---
 
