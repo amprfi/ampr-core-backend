@@ -98,7 +98,7 @@ async def send_message(
     convex_client = get_client()
 
     if payload.channel == "web":
-        # Full server-side agent pipeline — same as Telegram/SMS flow
+        # Full server-side agent pipeline — same as Telegram flow
         response_context = ResponseContext(
             message_content=payload.content,
             chat_id=None,
