@@ -19,9 +19,13 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from convex import ConvexClient
+
+if TYPE_CHECKING:
+    from src.modules.router import RoutingDecision
+    from src.modules.registry import ModuleRegistry
 
 from ...agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
 from ...agents.amprChat import build_help_overview
@@ -39,6 +43,15 @@ class PreprocessingResult:
 
     Contains all the data collected during preprocessing that will be used
     by the channel handlers to generate responses.
+    
+    For backward compatibility with the existing single-module flow,
+    module_name and module_response refer to the primary (first) module
+    when multiple modules are invoked. The router_decision field contains
+    the full RoutingDecision for multi-module support.
+    
+    For multi-module support (AMPRFI-104):
+    - modules: List of all module names that were invoked
+    - module_responses: Dict mapping module names to their responses
     """
     def __init__(
         self,
@@ -55,8 +68,11 @@ class PreprocessingResult:
         help_text: Optional[str] = None,
         module_name: Optional[str] = None,
         module_response: Optional[str] = None,
+        modules: Optional[list[str]] = None,
+        module_responses: Optional[dict[str, str]] = None,
         interim_messages: Optional[list[str]] = None,
         unresolved_triggers: Optional[list[str]] = None,
+        router_decision: Optional["RoutingDecision"] = None,
     ):
         self.chat_id = chat_id
         self.message_content = message_content
@@ -69,10 +85,15 @@ class PreprocessingResult:
         self.message_history_str = message_history_str
         self.is_bare_help = is_bare_help
         self.help_text = help_text
+        # Backward compatibility: single-module fields
         self.module_name = module_name
         self.module_response = module_response
+        # Multi-module support
+        self.modules: list[str] = modules or []
+        self.module_responses: dict[str, str] = module_responses or {}
         self.interim_messages: list[str] = interim_messages or []
         self.unresolved_triggers: list[str] = unresolved_triggers or []
+        self.router_decision = router_decision
 
 
 async def run_preprocessing(context: ResponseContext) -> PreprocessingResult:
@@ -191,37 +212,76 @@ async def run_preprocessing(context: ResponseContext) -> PreprocessingResult:
         date_context_str = date_context.to_context_string()
         logger.info(f"Date context: {date_context_str}")
 
-    # Check for module triggers
+    # Use the new unified router for module detection and routing
+    from src.modules.router import route_to_modules, RoutingDecision
+    
     module_registry = get_module_registry()
-    module_name = module_registry.detect_module_trigger(context.message_content)
+    
+    # Get routing decision from the router
+    routing_decision: RoutingDecision = route_to_modules(
+        context.message_content,
+        module_registry,
+        enable_llm_classification=False  # For now, only use mention-based routing in preprocessing
+    )
+    
+    # Multi-module support: invoke all detected modules concurrently
+    modules = routing_decision.modules
+    module_responses: dict[str, str] = {}
+    
+    # For backward compatibility, also set single-module fields
+    module_name = modules[0] if modules else None
     module_response = None
-
-    if module_name:
-        logger.info(f"Module '{module_name}' detected, invoking module")
-
-        # Send interim "working on it" message for real-time channels
-        await _send_interim_message(context, module_name, module_registry)
-
-        try:
-            module_response = await module_registry.invoke_module(
-                module_name,
-                context.message_content,
-                date_context=date_context_str
+    
+    # For Telegram channel with multiple modules: short-circuit to avoid wasted invocations
+    # Telegram will handle disambiguation separately
+    if modules and context.channel == "telegram" and len(modules) > 1:
+        logger.info(f"Multiple modules detected for Telegram channel: {modules}. "
+                   "Skipping module invocation to avoid wasted calls; Telegram handler will disambiguate.")
+        # Still populate modules list so Telegram handler can detect the case
+        # module_responses remains empty dict
+    elif modules:
+        logger.info(f"Modules detected via router: {modules}, invoking all concurrently")
+        
+        # Send interim "working on it" messages for real-time channels
+        for module_name_iter in modules:
+            await _send_interim_message(context, module_name_iter, module_registry)
+        
+        # Invoke all modules concurrently
+        module_tasks = []
+        for module_name_iter in modules:
+            task = asyncio.create_task(
+                _invoke_module_with_error_handling(
+                    module_registry,
+                    module_name_iter,
+                    context.message_content,
+                    date_context_str,
+                    context.user_id
+                )
             )
-            logger.info(f"Module '{module_name}' returned response")
-        except Exception as e:
-            error_msg = f"Module '{module_name}' failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            module_response = f"ERROR: {error_msg}"
-
-    # Detect unresolved module triggers (e.g., &lens, &foo — patterns not matched by any registered module)
+            module_tasks.append(task)
+        
+        # Wait for all modules to complete
+        module_results = await asyncio.gather(*module_tasks, return_exceptions=True)
+        
+        # Process results
+        for module_name_iter, result in zip(modules, module_results):
+            if isinstance(result, Exception):
+                error_msg = f"Module '{module_name_iter}' failed: {str(result)}"
+                logger.error(error_msg, exc_info=True)
+                module_responses[module_name_iter] = f"ERROR: {error_msg}"
+            else:
+                module_responses[module_name_iter] = result
+                logger.info(f"Module '{module_name_iter}' returned response")
+        
+        # For backward compatibility, set single-module fields to first module
+        if modules:
+            module_name = modules[0]
+            module_response = module_responses.get(modules[0])
+    
+    # Use unresolved triggers from the router
     interim_messages = []
-    mentioned_triggers = re.findall(r'&(\w+)', context.message_content)
-    unresolved_triggers = [
-        f"&{mention}" for mention in mentioned_triggers
-        if f"&{mention}" not in module_registry.triggers
-    ]
-
+    unresolved_triggers = routing_decision.unresolved_triggers
+    
     if unresolved_triggers:
         triggers_list = ", ".join(unresolved_triggers)
         not_found_text = f"The module {triggers_list} could not be found. I'll still try to answer your question."
@@ -287,8 +347,45 @@ async def run_preprocessing(context: ResponseContext) -> PreprocessingResult:
         is_bare_help=False,
         module_name=module_name,
         module_response=module_response,
+        modules=modules,
+        module_responses=module_responses,
         interim_messages=interim_messages,
         unresolved_triggers=unresolved_triggers,
+        router_decision=routing_decision,
+    )
+
+
+async def _invoke_module_with_error_handling(
+    module_registry: "ModuleRegistry",
+    module_name: str,
+    message_content: str,
+    date_context: Optional[str],
+    user_id: str
+) -> str:
+    """
+    Invoke a single module with error handling.
+    
+    This helper is used by the multi-module concurrent invocation to 
+    run each module independently with proper error handling.
+    
+    Args:
+        module_registry: The module registry
+        module_name: Name of the module to invoke
+        message_content: The user message to process
+        date_context: Optional resolved date context
+        user_id: The user ID to forward to the module
+        
+    Returns:
+        The module response string
+        
+    Raises:
+        Exception: If module invocation fails (will be caught by caller)
+    """
+    return await module_registry.invoke_module(
+        module_name,
+        message_content,
+        date_context=date_context,
+        user_id=user_id,
     )
 
 

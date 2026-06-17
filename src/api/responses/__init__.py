@@ -6,6 +6,7 @@ the storage and delivery of those responses across different channels (web, Tele
 
 The package is structured as:
 - context.py: ResponseContext class and related dataclasses
+- context_builder.py: Shared context string builder
 - preprocessing.py: Shared preprocessing logic (date detection, message storage, etc.)
 - postprocessing.py: Shared post-processing and delivery helpers
 - web.py: Web channel handler
@@ -16,26 +17,33 @@ Main entry points:
 - ResponseContext: Context object for generating AI responses
 """
 
-from typing import Sequence
+from typing import Sequence, Union, TYPE_CHECKING
 
 from .context import ResponseContext
+from .context_builder import build_context_string
 from .web import generate_web_response as _generate_web_response
 from .telegram import generate_telegram_response as _generate_telegram_response
+from src.models.chat_message import GeneratedResponseMessage
+
+if TYPE_CHECKING:
+    pass
 
 
-async def generate_ai_response(context: ResponseContext) -> Sequence[str]:
+async def generate_ai_response(context: ResponseContext) -> Union[Sequence[str], Sequence[GeneratedResponseMessage]]:
     """
     Generate an AI response and handle storage and delivery.
 
     This is the main entry point that routes to the appropriate channel-specific handler.
-    It preserves the existing behavior by delegating to web or telegram handlers based
-    on the channel specified in the context.
+    For web channel, returns GeneratedResponseMessage objects with attribution (AMPRFI-104).
+    For other channels, returns strings for backward compatibility.
 
     Args:
         context: ResponseContext object containing all necessary information
 
     Returns:
-        list[str]: The generated AI response messages
+        Union[Sequence[str], Sequence[GeneratedResponseMessage]]: 
+            - For web/rest channels: list[GeneratedResponseMessage] with attribution
+            - For telegram/other channels: list[str] (backward compatible)
 
     Raises:
         Exception: If any step in the process fails

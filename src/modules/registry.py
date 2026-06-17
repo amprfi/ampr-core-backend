@@ -1,5 +1,4 @@
 import os
-import re
 import yaml
 import logging
 from pathlib import Path
@@ -55,6 +54,7 @@ class ModuleRegistry:
                     intents=module_config.get('intents', []),
                     notification_types=module_config.get('notification_types', []),
                     response_instructions=module_config.get('response_instructions', ''),
+                    constraints=module_config.get('constraints', []),
                     service_url=module_config.get('service_url'),
                 )
 
@@ -74,6 +74,7 @@ class ModuleRegistry:
         intents: List[str] = None,
         notification_types: List[Dict] = None,
         response_instructions: str = "",
+        constraints: List[str] = None,
         service_url: Optional[str] = None,
     ):
         """
@@ -87,6 +88,7 @@ class ModuleRegistry:
             intents: List of intent keywords the module handles
             notification_types: Notification type definitions from modules.yaml
             response_instructions: Instructions for amprChat on how to present this module's data
+            constraints: List of constraints for this module
         """
         try:
             # Check for environment variable override (e.g., EDUCATION_MODULE_URL)
@@ -133,6 +135,7 @@ class ModuleRegistry:
                 "trigger": trigger,
                 "notification_types": notification_types or [],
                 "response_instructions": response_instructions,
+                "constraints": constraints or [],
                 "service_url": service_url,
             }
 
@@ -148,6 +151,9 @@ class ModuleRegistry:
         """
         Detect if a message contains a module trigger.
 
+        Note: This method returns only the FIRST trigger found. For detecting
+        multiple triggers, use detect_module_triggers() instead.
+
         Args:
             message: User message to scan for triggers
 
@@ -160,6 +166,23 @@ class ModuleRegistry:
                 return module_name
 
         return None
+
+    def detect_module_triggers(self, message: str) -> list[str]:
+        """
+        Detect all module triggers in a message.
+        
+        Delegates to the unified module router so that trigger extraction,
+        order preservation, deduplication, and substring filtering live in one
+        place. Supports multiple triggers in one message.
+        
+        Args:
+            message: User message to scan for triggers
+            
+        Returns:
+            List of trigger strings found in the message (in order, deduplicated)
+        """
+        from .router import detect_module_triggers as _router_detect
+        return _router_detect(message, self)
 
     def get_module(self, name: str) -> Optional[ModuleInterface]:
         """

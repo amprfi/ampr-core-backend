@@ -21,6 +21,7 @@ from src.middleware.auth import get_current_user_id
 from src.middleware.logging import debug_detail
 from src.clients.convex_client import get_client
 from src.api.responses import generate_ai_response, ResponseContext
+from src.models.chat_message import ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class SendMessageRequest(BaseModel):
 
 class SendMessageResponse(BaseModel):
     """Response for a chat message."""
-    messages: Optional[list[str]] = None  # AI response messages (web only)
+    messages: Optional[list[ChatMessage]] = None  # AI response messages with attribution (web only)
     acknowledged: bool = True
 
 
@@ -109,7 +110,23 @@ async def send_message(
 
         try:
             response_messages = await generate_ai_response(response_context)
-            return SendMessageResponse(messages=response_messages)
+            # Convert to ChatMessage format for API response
+            # For web channel, response_messages are GeneratedResponseMessage objects
+            # For other channels, they are strings
+            from src.models.chat_message import GeneratedResponseMessage
+            
+            chat_messages = []
+            for msg in response_messages:
+                if isinstance(msg, GeneratedResponseMessage):
+                    chat_messages.append(ChatMessage(
+                        content=msg.content,
+                        specialist_module=msg.specialist_module
+                    ))
+                else:
+                    # Backward compatibility for string messages
+                    chat_messages.append(ChatMessage(content=msg))
+            
+            return SendMessageResponse(messages=chat_messages)
         except Exception as e:
             logger.error(f"Error generating AI response for web chat: {e}", exc_info=True)
             raise HTTPException(

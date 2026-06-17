@@ -45,7 +45,6 @@ class TalkerContext(BaseModel):
     user_id: str
     date_context: str | None = None
     invoked_modules: list[str] = []
-    module_already_invoked: bool = False  # True if &mention already triggered a module
     channel: str | None = None
     telegram_id: str | None = None
     currency_context: str = "display_currency: USD"
@@ -397,71 +396,7 @@ async def list_specialist_modules(ctx: RunContext[TalkerContext]) -> List[Dict[s
     logger.info(f"Tool result: list_specialist_modules returned {len(modules)} modules")
     return modules
 
-@agent.tool
-async def call_specialist_module(
-    ctx: RunContext[TalkerContext],
-    module_name: str,
-    question: str,
-) -> str:
-    """
-    Call a specialist financial module when you need live or detailed data.
 
-    Args:
-        module_name: The name of the module to call. See system prompt for available modules.
-        question: A focused description of what you want the module to answer,
-            derived from the user's request.
-
-    Returns:
-        The module's response with the requested data.
-    """
-    logger.info(f"Tool called: call_specialist_module for module={module_name}")
-
-    if ctx.deps.module_already_invoked:
-        logger.info("Module already invoked via &mention, skipping tool call")
-        return "A specialist module has already been invoked for this request. Use the data from [MODULE RESPONSE] instead."
-
-    registry = get_module_registry()
-    module = registry.get_module(module_name)
-
-    if not module:
-        available = [m["name"] for m in registry.list_modules()]
-        error_msg = f"Unknown module '{module_name}'. Available modules: {', '.join(available)}"
-        logger.warning(f"Tool error: call_specialist_module - {error_msg}")
-        return f"ERROR: {error_msg}"
-
-    # Send interim "working on it" message (only on first invocation)
-    if module_name not in ctx.deps.invoked_modules:
-        await _send_tool_interim_message(ctx.deps, module_name, registry)
-
-    try:
-        result = await registry.invoke_module(
-            module_name,
-            message=question,
-            date_context=ctx.deps.date_context,
-            user_id=ctx.deps.user_id,
-        )
-
-        if module_name not in ctx.deps.invoked_modules:
-            ctx.deps.invoked_modules.append(module_name)
-
-        logger.info(f"Tool result: call_specialist_module for {module_name} succeeded")
-
-        # Prepend module-specific response instructions and constraints if available
-        response_instructions = registry.get_response_instructions(module_name)
-        constraints = registry.get_constraints_for_module(module_name)
-        instructions_block = ""
-        if response_instructions:
-            instructions_block += f"[RESPONSE FORMATTING INSTRUCTIONS]\n{response_instructions}\n"
-        if constraints:
-            instructions_block += "[MODULE CONSTRAINTS]\n" + "\n".join(f"- {c}" for c in constraints) + "\n"
-        if instructions_block:
-            result = f"{instructions_block}[MODULE DATA]\n{result}"
-
-        return result
-    except Exception as e:
-        error_msg = f"Module '{module_name}' failed: {str(e)}"
-        logger.error(f"Tool error: call_specialist_module - {error_msg}", exc_info=True)
-        return f"ERROR: {error_msg}"
 
 @agent.tool
 async def manage_notification_preferences(
@@ -924,11 +859,11 @@ async def get_system_prompt(ctx: RunContext[TalkerContext]) -> str:
     registry = get_module_registry()
     modules = registry.list_modules()
 
-    lines = ["You MUST call call_specialist_module when the user's message matches ANY of the intents listed below. Do NOT answer without calling the appropriate module first."]
+    lines = ["The following specialist modules are available. Use their data when present in [MODULE RESPONSE], but do NOT call them directly - module invocation is handled automatically via &mention triggers or the unified router."]
     for mod in modules:
         intents = mod.get("intents", [])
         lines.append(f'\n"{mod["name"]}": {mod["description"]}')
-        lines.append("  Call this module when the user's message involves:")
+        lines.append("  This module can provide data for:")
         for intent in intents:
             lines.append(f"  - {intent}")
 
@@ -936,28 +871,6 @@ async def get_system_prompt(ctx: RunContext[TalkerContext]) -> str:
     prompt = PROMPT_TEMPLATE.format(specialist_modules=specialist_modules_str)
     prompt += f"\n\nCURRENCY CONTEXT:\n{ctx.deps.currency_context}"
     return prompt
-
-async def _send_tool_interim_message(deps: TalkerContext, module_name: str, registry) -> None:
-    """Send an interim message when amprChat invokes a module via tool call."""
-    try:
-        meta = registry.metadata.get(module_name, {})
-        display_name = meta.get("trigger", f"&{module_name}").lstrip("&")
-        interim_text = f"**{display_name}** 🔍 is working on this..."
-
-        if deps.channel == "telegram" and deps.telegram_id:
-            from ..clients.telegram_client import TelegramClient
-            telegram_client = TelegramClient()
-            await telegram_client.send_message(
-                chat_id=int(deps.telegram_id),
-                text=interim_text
-            )
-            await telegram_client.close()
-            logger.info(f"Sent interim message to Telegram {deps.telegram_id} for module '{module_name}'")
-        else:
-            logger.info(f"Interim message (channel '{deps.channel}'): {interim_text}")
-    except Exception as e:
-        logger.warning(f"Failed to send interim message for module '{module_name}': {e}")
-
 
 def get_amprChat_agent():
     return agent

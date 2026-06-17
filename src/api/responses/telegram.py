@@ -16,6 +16,7 @@ from ...modules.registry import get_module_registry
 from .context import ResponseContext
 from .preprocessing import run_preprocessing
 from .postprocessing import store_and_deliver_response, schedule_memory_management, schedule_profile_watcher
+from .context_builder import build_context_string
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,47 @@ async def generate_telegram_response(context: ResponseContext) -> list[str]:
             logger.info(f"Stored AI response in database for chat {context.chat_id}")
             return [help_text]  # type: ignore[return-value]
 
-        # Build context string for the agent
-        context_str = _build_context_string(
+        # Multi-module support for Telegram: disambiguate when multiple modules are detected
+        module_registry = get_module_registry()
+        modules = preprocess_result.modules or []
+        
+        # For Telegram, if multiple modules are detected, ask for clarification
+        if len(modules) > 1:
+            logger.info(f"Multiple modules detected for Telegram: {modules}, sending disambiguation")
+            
+            # Build disambiguation message
+            module_triggers = []
+            for module_name in modules:
+                metadata = module_registry.metadata.get(module_name, {})
+                trigger = metadata.get("trigger", f"&{module_name}")
+                description = metadata.get("description", "")
+                module_triggers.append(f"{trigger} — {description}" if description else trigger)
+            
+            triggers_only = [m.split(' — ')[0] for m in module_triggers]
+            disambiguation_msg = (
+                f"I can only work with one specialist module per message here. "
+                f"I detected multiple in your request: {', '.join(triggers_only)}. "
+                f"Which would you like me to start with?\n\n"
+                f"Available options:\n" + "\n".join(f"- {m}" for m in module_triggers)
+            )
+            
+            # Store and deliver the disambiguation message
+            await store_and_deliver_response(
+                context,
+                [disambiguation_msg],
+                specialist_module=None
+            )
+            
+            # Schedule background tasks
+            schedule_memory_management(context)
+            if not preprocess_result.needs_onboarding:
+                schedule_profile_watcher(context, context.message_content)
+            
+            return [disambiguation_msg]
+        
+        # Single or zero module case: proceed normally
+        # Build context string for the agent using shared builder
+        context_str = build_context_string(
             preprocess_result.summaries_str,
             preprocess_result.message_history_str,
             preprocess_result.message_content,
@@ -71,6 +111,7 @@ async def generate_telegram_response(context: ResponseContext) -> list[str]:
             preprocess_result.module_name,
             preprocess_result.module_response,
             preprocess_result.unresolved_triggers,
+            registry=module_registry,
         )
 
         # Get the agent response with enhanced context (retry on transient LLM errors)
@@ -99,7 +140,6 @@ async def generate_telegram_response(context: ResponseContext) -> list[str]:
                         user_id=context.user_id,
                         date_context=preprocess_result.date_context_str,
                         invoked_modules=[preprocess_result.module_name] if preprocess_result.module_name else [],
-                        module_already_invoked=preprocess_result.module_name is not None,
                         channel=context.channel,
                         telegram_id=context.telegram_id,
                         currency_context=preprocess_result.currency_context,
@@ -158,91 +198,4 @@ async def generate_telegram_response(context: ResponseContext) -> list[str]:
         raise
 
 
-def _build_context_string(
-    summaries_str: str,
-    message_history_str: str,
-    message_content: str,
-    date_context_str: Optional[str],
-    module_name: Optional[str],
-    module_response: Optional[str],
-    unresolved_triggers: list[str],
-) -> str:
-    """
-    Build the context string for the AI agent.
 
-    Constructs the prompt context including summaries, message history,
-    current message, date context, and module information.
-
-    Args:
-        summaries_str: Formatted summaries string
-        message_history_str: JSON string of message history
-        message_content: Current user message content
-        date_context_str: Optional date context string
-        module_name: Optional name of the invoked module
-        module_response: Optional response from the invoked module
-        unresolved_triggers: List of unresolved module triggers
-
-    Returns:
-        str: The complete context string for the agent
-    """
-    # Build date context section if available
-    date_context_section = f"\n\n        {date_context_str}" if date_context_str else ""
-
-    if module_response:
-        # Build module-specific presentation instructions if available
-        module_registry = get_module_registry()
-        response_instructions = module_registry.get_response_instructions(module_name) if module_name else ""
-        constraints = module_registry.get_constraints_for_module(module_name) if module_name else []
-        extra_sections = ""
-        if response_instructions:
-            extra_sections += f"\n\n        MODULE-SPECIFIC FORMATTING:\n        {response_instructions}"
-        if constraints:
-            constraints_str = "\n        ".join(f"- {c}" for c in constraints)
-            extra_sections += f"\n\n        MODULE CONSTRAINTS:\n        {constraints_str}"
-        presentation_guidance = f"IMPORTANT: Present this data in a natural, conversational way that fits your tone. Preserve all factual information (numbers, dates, names) exactly as provided, but feel free to rephrase for readability. Do not add speculation or information beyond what the module provided.{extra_sections}"
-
-        context_str = f"""
-        [LONG TERM MEMORY / SUMMARIES]
-        The following are summaries of earlier conversation parts (chronological order):
-        {summaries_str}
-
-        [RECENT CONVERSATION]
-        Previous conversation history (chronological order):
-        {message_history_str}
-
-        [CURRENT MESSAGE]
-        User message:
-        {message_content}{date_context_section}
-
-        [MODULE RESPONSE]
-        A specialized module has processed this request and returned the following response:
-        {module_response}
-
-        {presentation_guidance}
-        """
-    else:
-        # Build optional module-not-found section
-        module_not_found_section = ""
-        if unresolved_triggers:
-            triggers_list = ", ".join(unresolved_triggers)
-            module_not_found_section = f"""
-
-        [MODULE NOT FOUND]
-        The user attempted to invoke the following module(s) that could not be found: {triggers_list}
-        """
-
-        context_str = f"""
-        [LONG TERM MEMORY / SUMMARIES]
-        The following are summaries of earlier conversation parts (chronological order):
-        {summaries_str}
-
-        [RECENT CONVERSATION]
-        Previous conversation history (chronological order):
-        {message_history_str}
-
-        [CURRENT MESSAGE]
-        Current message to respond to:
-        {message_content}{date_context_section}
-        {module_not_found_section}"""
-
-    return context_str
