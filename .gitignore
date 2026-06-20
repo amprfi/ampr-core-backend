@@ -7,3 +7,4 @@ __pycache__
 # Convex
 node_modules/
 convex/_generated/
+tmp/
