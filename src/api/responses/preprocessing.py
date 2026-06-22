@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from src.modules.router import RoutingDecision
     from src.modules.registry import ModuleRegistry
 
-from ...agents.date_preprocessor import get_date_preprocessor_agent, DatePreprocessorContext, has_date_references, DateContext
+from ...agents.date_preprocessor import get_date_preprocessor_agent, has_date_references, DateContext
 from ...agents.amprChat import build_help_overview
 from ...agents.watchlist_inferrer import infer_watchlist
 from ...agents.currency_inferrer import infer_display_currency
@@ -129,9 +129,8 @@ async def run_preprocessing(context: ResponseContext) -> PreprocessingResult:
     if has_date_references(context.message_content):
         logger.info("Date references detected, starting date preprocessor concurrently")
         date_preprocessor_agent = get_date_preprocessor_agent()
-        date_preprocessor_context = DatePreprocessorContext()
         date_task = asyncio.create_task(
-            date_preprocessor_agent.run(context.message_content, deps=date_preprocessor_context)
+            date_preprocessor_agent.run(context.message_content)
         )
     else:
         logger.info("No date references detected, skipping date preprocessor")
@@ -207,8 +206,7 @@ async def run_preprocessing(context: ResponseContext) -> PreprocessingResult:
     # Resolve date context before module invoke (modules may need it)
     date_context_str = None
     if date_task:
-        date_preprocessor_result = await date_task
-        date_context: DateContext = date_preprocessor_result.output
+        date_context: DateContext = await date_task
         date_context_str = date_context.to_context_string()
         logger.info(f"Date context: {date_context_str}")
 
@@ -218,7 +216,7 @@ async def run_preprocessing(context: ResponseContext) -> PreprocessingResult:
     module_registry = get_module_registry()
     
     # Get routing decision from the router
-    routing_decision: RoutingDecision = route_to_modules(
+    routing_decision: RoutingDecision = await route_to_modules(
         context.message_content,
         module_registry,
         enable_llm_classification=False  # For now, only use mention-based routing in preprocessing

@@ -37,6 +37,10 @@ packages = [
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.4.1"
+pytest-asyncio = "^0.23.0"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [tool.pyright]
 venvPath = "/home/cgeorgen/.cache/pypoetry/virtualenvs"
