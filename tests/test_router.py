@@ -136,9 +136,9 @@ class TestFilterSubstringFalsePositives:
 class TestRouteToModules:
     """Tests for the route_to_modules function."""
 
-    def test_known_mention(self, registry):
+    async def test_known_mention(self, registry):
         """Test routing with a known module mention."""
-        decision = route_to_modules(
+        decision = await route_to_modules(
             "What is &defianalyst doing?",
             registry,
             enable_llm_classification=False
@@ -148,9 +148,9 @@ class TestRouteToModules:
         assert "defianalyst" in decision.modules
         assert decision.unresolved_triggers == []
 
-    def test_multiple_known_mentions(self, registry):
+    async def test_multiple_known_mentions(self, registry):
         """Test routing with multiple known module mentions."""
-        decision = route_to_modules(
+        decision = await route_to_modules(
             "Tell me about &defianalyst and &oracle",
             registry,
             enable_llm_classification=False
@@ -160,9 +160,9 @@ class TestRouteToModules:
         assert "defianalyst" in decision.modules
         assert "oracle" in decision.modules
 
-    def test_unknown_mention(self, registry):
+    async def test_unknown_mention(self, registry):
         """Test routing with an unknown module mention."""
-        decision = route_to_modules(
+        decision = await route_to_modules(
             "What is &unknown doing?",
             registry,
             enable_llm_classification=False
@@ -172,9 +172,9 @@ class TestRouteToModules:
         assert decision.modules == []
         assert "&unknown" in decision.unresolved_triggers
 
-    def test_mixed_known_and_unknown(self, registry):
+    async def test_mixed_known_and_unknown(self, registry):
         """Test routing with both known and unknown mentions."""
-        decision = route_to_modules(
+        decision = await route_to_modules(
             "Tell me about &defianalyst and &unknown",
             registry,
             enable_llm_classification=False
@@ -183,9 +183,9 @@ class TestRouteToModules:
         assert "defianalyst" in decision.modules
         assert "&unknown" in decision.unresolved_triggers
 
-    def test_no_mentions_no_llm(self, registry):
+    async def test_no_mentions_no_llm(self, registry):
         """Test routing with no mentions and LLM classification disabled."""
-        decision = route_to_modules(
+        decision = await route_to_modules(
             "What is the price of Bitcoin?",
             registry,
             enable_llm_classification=False

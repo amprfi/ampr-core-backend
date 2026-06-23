@@ -1,5 +1,4 @@
 from pathlib import Path
-from pydantic_ai import Agent
 from pydantic import BaseModel
 from typing import Optional
 from convex import ConvexClient
@@ -8,6 +7,12 @@ import re
 
 from ..modules.defianalyst.coingecko_client import CoinGeckoClient
 from ..modules.defianalyst.utils import is_asset_reference
+from .mistral_helpers import (
+    get_shared_client,
+    build_messages,
+    complete_json_schema,
+    MODEL_SMALL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,18 +114,74 @@ def _scan_message_for_assets(message: str, asset_identifiers: list[dict]) -> lis
     return list(matched.values())
 
 
-# Agent is only used for intent classification — no tools needed
-_intent_agent = Agent(
-    "mistral:mistral-small-latest",
-    output_type=bool,
-    system_prompt=(Path(__file__).parent / "prompts/watchlist_inferrer.md").read_text(),
-)
+# Structured output for intent classification
+class WatchlistIntent(BaseModel):
+    """Structured output for watchlist intent classification."""
+    is_explicit_watch: bool = False
 
 
-class WatchlistInferenceResult(BaseModel):
-    """Result of a watchlist inference run."""
-    assets_found: list[str]
-    is_explicit_watch: bool
+PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/watchlist_inferrer.md").read_text()
+
+
+class WatchlistInferrerAgent:
+    """
+    Watchlist inferrer agent using Mistral SDK.
+
+    Performs intent classification (stated vs inferred watch) using structured output.
+    """
+
+    def __init__(self):
+        self.client = get_shared_client()
+        self.system_prompt = PROMPT_TEMPLATE
+        self.schema = WatchlistIntent.model_json_schema()
+
+    async def run(self, message: str) -> bool:
+        """
+        Classify whether the user explicitly wants to watch assets.
+
+        Args:
+            message: The message to classify (should include asset context)
+
+        Returns:
+            True if explicit watch intent, False if inferred
+        """
+        messages = build_messages(self.system_prompt, message)
+
+        try:
+            result_dict = await complete_json_schema(
+                client=self.client,
+                model=MODEL_SMALL,
+                messages=messages,
+                schema=self.schema,
+                temperature=0.0,
+                reasoning_effort="none",
+            )
+
+            intent = WatchlistIntent(**result_dict)
+            logger.info(f"Watchlist intent classification: {intent.is_explicit_watch}")
+            return intent.is_explicit_watch
+
+        except Exception as e:
+            logger.error(f"Watchlist intent classification failed: {e}", exc_info=True)
+            # Graceful fallback: assume not explicit
+            return False
+
+
+# Singleton instance
+_agent_instance: WatchlistInferrerAgent | None = None
+
+
+def get_watchlist_inferrer_agent() -> WatchlistInferrerAgent:
+    """
+    Get a watchlist inferrer agent instance.
+
+    Returns:
+        Singleton WatchlistInferrerAgent instance
+    """
+    global _agent_instance
+    if _agent_instance is None:
+        _agent_instance = WatchlistInferrerAgent()
+    return _agent_instance
 
 
 async def infer_watchlist(convex_client: ConvexClient, user_id: str, message: str) -> str:
@@ -164,8 +225,8 @@ async def infer_watchlist(convex_client: ConvexClient, user_id: str, message: st
     # Step 2: Classify intent via agent
     intent_prompt = f"User message: \"{message}\"\nAssets found: {', '.join(asset_labels)}"
     try:
-        result = await _intent_agent.run(intent_prompt)
-        is_explicit = result.output
+        agent = get_watchlist_inferrer_agent()
+        is_explicit = await agent.run(intent_prompt)
     except Exception as e:
         logger.error(f"Intent classification failed for user {user_id}: {e}")
         is_explicit = False
