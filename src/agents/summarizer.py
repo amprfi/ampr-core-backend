@@ -5,7 +5,7 @@ from .mistral_helpers import (
     get_shared_client,
     build_messages,
     extract_text_from_content,
-    MODEL_SMALL,
+    MODEL_MEDIUM,
 )
 
 logger = logging.getLogger(__name__)

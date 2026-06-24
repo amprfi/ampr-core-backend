@@ -154,7 +154,7 @@ async def _synthesize_multi_module_response(
         # Build module-specific context for synthesis
         synthesis_context = _build_module_synthesis_context(
             preprocess_result, module_registry, module_name, module_response,
-            cross_module_context, other_modules
+            cross_module_context
         )
 
         task = asyncio.create_task(
@@ -218,6 +218,7 @@ async def _synthesize_single_module_response(
         preprocess_result.message_history_str,
         preprocess_result.message_content,
         preprocess_result.date_context_str,
+        preprocess_result.currency_context,
         preprocess_result.module_name,
         preprocess_result.module_response,
         preprocess_result.unresolved_triggers,
@@ -267,6 +268,7 @@ async def _synthesize_general_response(
         preprocess_result.message_history_str,
         preprocess_result.message_content,
         preprocess_result.date_context_str,
+        preprocess_result.currency_context,
         None,  # No module name
         None,  # No module response
         preprocess_result.unresolved_triggers,
@@ -332,7 +334,6 @@ async def _get_agent_response(
                     invoked_modules=invoked_modules,
                     channel=context.channel,
                     telegram_id=context.telegram_id,
-                    currency_context=preprocess_result.currency_context,
                 )
                 result = await amprChat_agent.run(
                     context_str,
@@ -385,6 +386,8 @@ def _build_module_synthesis_context(
     # This mirrors the behavior in context_builder.py's build_context_string
     if module_response and module_response.startswith("ERROR:"):
         date_context_section = f"\n    {preprocess_result.date_context_str}" if preprocess_result.date_context_str else ""
+        currency_context_section = f"\n    {preprocess_result.currency_context}" if preprocess_result.currency_context else ""
+        combined_context_section = date_context_section + currency_context_section
         return f"""[LONG TERM MEMORY / SUMMARIES]
 The following are summaries of earlier conversation parts (chronological order):
 {preprocess_result.summaries_str}
@@ -395,7 +398,7 @@ Previous conversation history (chronological order):
 
 [CURRENT MESSAGE]
 User message:
-{preprocess_result.message_content}{date_context_section}
+{preprocess_result.message_content}{combined_context_section}
 
 [MODULE UNAVAILABLE]
 A specialist module was invoked for this request but failed and is currently unavailable.
@@ -433,6 +436,8 @@ Acknowledge to the user that the module could not complete the request right now
 
     # Build the main context string
     date_context_section = f"\n    {preprocess_result.date_context_str}" if preprocess_result.date_context_str else ""
+    currency_context_section = f"\n    {preprocess_result.currency_context}" if preprocess_result.currency_context else ""
+    combined_context_section = date_context_section + currency_context_section
 
     context_str = f"""[LONG TERM MEMORY / SUMMARIES]
 The following are summaries of earlier conversation parts (chronological order):
@@ -444,7 +449,7 @@ Previous conversation history (chronological order):
 
 [CURRENT MESSAGE]
 User message:
-{preprocess_result.message_content}{date_context_section}
+{preprocess_result.message_content}{combined_context_section}
 
 [MODULE RESPONSE]
 A specialized module has processed this request and returned the following response:
