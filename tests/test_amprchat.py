@@ -426,7 +426,7 @@ class TestCurrencyContext:
         # Importing the web handler imports onboarding.py, which still initializes
         # pydantic-ai's Mistral provider at module load time.
         monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
-        from src.api.responses.web import _build_module_synthesis_context
+        from src.api.responses.synthesis_context import build_module_synthesis_context
 
         preprocess_result = MagicMock()
         preprocess_result.summaries_str = "summary"
@@ -438,14 +438,14 @@ class TestCurrencyContext:
         module_registry = MagicMock()
         module_registry.metadata = {"defianalyst": {}}
 
-        normal_context = _build_module_synthesis_context(
+        normal_context = build_module_synthesis_context(
             preprocess_result,
             module_registry,
             "defianalyst",
             "Bitcoin is $100,000 USD",
             "",
         )
-        unavailable_context = _build_module_synthesis_context(
+        unavailable_context = build_module_synthesis_context(
             preprocess_result,
             module_registry,
             "defianalyst",

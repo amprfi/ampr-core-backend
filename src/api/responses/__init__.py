@@ -17,12 +17,13 @@ Main entry points:
 - ResponseContext: Context object for generating AI responses
 """
 
-from typing import Sequence, Union, TYPE_CHECKING
+from typing import Sequence, Union, AsyncIterator, TYPE_CHECKING
 
 from .context import ResponseContext
 from .context_builder import build_context_string
 from .web import generate_web_response as _generate_web_response
 from .telegram import generate_telegram_response as _generate_telegram_response
+from .streaming import generate_streaming_response
 from src.models.chat_message import GeneratedResponseMessage
 
 if TYPE_CHECKING:
@@ -60,4 +61,4 @@ async def generate_ai_response(context: ResponseContext) -> Union[Sequence[str],
         return await _generate_web_response(context)
 
 
-__all__ = ["generate_ai_response", "ResponseContext"]
+__all__ = ["generate_ai_response", "ResponseContext", "generate_streaming_response"]
