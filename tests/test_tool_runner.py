@@ -373,6 +373,23 @@ class TestExecTool:
         assert result.name == "simple_tool"
         assert result.tool_call_id == "call_123"
         assert "Hello, Test!" in result.content
+
+    @pytest.mark.asyncio
+    async def test_successful_tool_execution_with_dict_args(self, mock_runner_config):
+        """Test successful tool execution when Mistral provides parsed dict arguments."""
+        tool_call = {
+            "id": "call_123",
+            "name": "simple_tool",
+            "args": {"name": "Test"}
+        }
+
+        result = await _exec_tool(mock_runner_config, tool_call)
+
+        assert isinstance(result, ToolMessage)
+        assert result.role == "tool"
+        assert result.name == "simple_tool"
+        assert result.tool_call_id == "call_123"
+        assert "Hello, Test!" in result.content
     
     @pytest.mark.asyncio
     async def test_unknown_tool(self, mock_runner_config):
@@ -704,6 +721,61 @@ class TestStreamOneCall:
         assert result.tool_calls[0]["name"] == "simple_tool"
         assert result.tool_calls[0]["args"] == '{"name": "test"}'
         # No visible text deltas expected (tool call event has content=None)
+        assert "".join(deltas) == ""
+
+    @pytest.mark.asyncio
+    async def test_stream_one_call_with_dict_tool_args(self, mock_runner_config):
+        """Test _stream_one_call accepts dict-shaped Mistral tool arguments."""
+        from mistralai.client.models import (
+            CompletionEvent,
+            CompletionChunk,
+            CompletionResponseStreamChoice,
+            DeltaMessage,
+            ToolCall,
+            FunctionCall,
+        )
+
+        tool_call = ToolCall(
+            index=0,
+            id="call_123",
+            function=FunctionCall(name="simple_tool", arguments={"name": "test"}),
+            type="function"
+        )
+        delta = DeltaMessage(content=None, tool_calls=[tool_call])
+        choice = CompletionResponseStreamChoice(
+            index=0,
+            delta=delta,
+            finish_reason="tool_calls"
+        )
+        chunk = CompletionChunk(
+            id="cmpl_1",
+            model="mistral-medium-3-5",
+            choices=[choice],
+            object="chat.completion.chunk"
+        )
+        event = CompletionEvent(data=chunk)
+
+        async def mock_stream():
+            yield event
+
+        mock_runner_config.client.chat.stream_async.return_value = mock_stream()
+
+        messages = [
+            SystemMessage(content="You are a helper"),
+            UserMessage(content="Call a tool")
+        ]
+
+        outcome = _StreamOutcome()
+        deltas = []
+        async for delta in _stream_one_call(mock_runner_config, messages, outcome):
+            deltas.append(delta)
+
+        assert outcome.result is not None
+        result = outcome.result
+        assert result.finish_reason == "tool_calls"
+        assert len(result.tool_calls) == 1
+        assert result.tool_calls[0]["name"] == "simple_tool"
+        assert json.loads(result.tool_calls[0]["args"]) == {"name": "test"}
         assert "".join(deltas) == ""
     
     @pytest.mark.asyncio
