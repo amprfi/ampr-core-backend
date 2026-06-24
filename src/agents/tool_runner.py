@@ -72,6 +72,11 @@ class RunnerConfig:
         model: Model identifier (e.g., "mistral-medium-3-5")
         tools: Dictionary mapping tool names to Tool instances
         system_prompt: System prompt for the agent
+        context_messages: Optional list of additional messages (SystemMessage/UserMessage)
+            to insert between the system prompt and user message. Useful for runtime
+            context that should not be part of the static system prompt. These messages
+            are part of the model's context for this turn but are not persisted as part
+            of chat history.
         max_iterations: Maximum number of tool loop iterations (default: 10)
         reasoning_effort: "high" or "none" (default: "high")
         tool_choice: "auto", "required", or "none" (default: "auto")
@@ -80,6 +85,7 @@ class RunnerConfig:
     model: str
     tools: dict[str, Tool]
     system_prompt: str
+    context_messages: Optional[list[Union[SystemMessage, UserMessage]]] = None
     max_iterations: int = 10
     reasoning_effort: str = "high"
     tool_choice: str = "auto"
@@ -288,6 +294,34 @@ def _reconstruct_full_content(text_parts: list[str], thinking_parts: list[str]) 
 # Tool Execution
 # =============================================================================
 
+def _parse_tool_args(args: Any) -> Any:
+    """
+    Normalize tool-call arguments for Pydantic validation.
+
+    Mistral SDK tool arguments may arrive either as a JSON string or as an
+    already-parsed dict. Keep dicts intact and only JSON-decode strings.
+    """
+    if args is None or args == "":
+        return {}
+    if isinstance(args, str):
+        return json.loads(args)
+    return args
+
+
+def _serialize_tool_args_fragment(args: Any) -> str:
+    """
+    Convert a streamed tool-arguments fragment into the string form stored in
+    assistant history. Dict/list args are complete SDK payloads, not partial JSON.
+    """
+    if args is None:
+        return ""
+    if isinstance(args, str):
+        return args
+    if isinstance(args, (dict, list)):
+        return json.dumps(args)
+    return str(args)
+
+
 async def _exec_tool(config: RunnerConfig, tool_call: dict) -> ToolMessage:
     """
     Execute a single tool call with argument validation.
@@ -309,7 +343,7 @@ async def _exec_tool(config: RunnerConfig, tool_call: dict) -> ToolMessage:
         ToolMessage instance for the conversation history
     """
     tool_name = tool_call.get("name", "")
-    args_str = tool_call.get("args", "")
+    args_raw = tool_call.get("args", "")
     tool_call_id = tool_call.get("id", "")
 
     try:
@@ -326,8 +360,8 @@ async def _exec_tool(config: RunnerConfig, tool_call: dict) -> ToolMessage:
 
         # Validate arguments with Pydantic
         try:
-            args_data = json.loads(args_str) if args_str else {}
-            validated_args = tool.args_model(**args_data)
+            args_data = _parse_tool_args(args_raw)
+            validated_args = tool.args_model.model_validate(args_data)
         except json.JSONDecodeError as e:
             logger.warning(f"Invalid JSON arguments for tool {tool_name}: {e}")
             return ToolMessage(
@@ -356,10 +390,14 @@ async def _exec_tool(config: RunnerConfig, tool_call: dict) -> ToolMessage:
         try:
             result = await tool.func(**validated_args.model_dump())
 
-            # Ensure result is string
+            # Ensure result is string - use json.dumps for list/dict to get proper JSON
             if result is None:
                 result = ""
-            elif not isinstance(result, str):
+            elif isinstance(result, str):
+                pass  # Already a string
+            elif isinstance(result, (list, dict)):
+                result = json.dumps(result)
+            else:
                 result = str(result)
 
             return ToolMessage(
@@ -481,15 +519,16 @@ async def _stream_one_call(
 
                 # Get arguments - handle both Pydantic models and dicts
                 if hasattr(tc, 'function') and hasattr(tc.function, 'arguments'):
-                    args = tc.function.arguments or ""
+                    args = tc.function.arguments
                 elif isinstance(tc, dict) and 'function' in tc:
-                    args = tc['function'].get('arguments', '') or ''
+                    args = tc['function'].get('arguments', '')
                 else:
                     args = ""
 
-                # Mistral sends complete tool calls, so this is typically a no-op
-                # (args arrive complete), but we append just in case
-                tool_calls[idx]["args"] += args
+                # Mistral usually sends complete tool calls, but string arguments
+                # may still arrive in fragments. Dict/list arguments are complete
+                # SDK payloads and get serialized once for consistent history.
+                tool_calls[idx]["args"] += _serialize_tool_args_fragment(args)
 
     # Build full assistant message for history coherence
     full_content = _reconstruct_full_content(text_buf, thinking_buf)
@@ -556,18 +595,30 @@ async def run_stream(
     # Build initial messages - local to this invocation
     messages: list[Union[SystemMessage, UserMessage, ToolMessage, AssistantMessage]] = [
         SystemMessage(content=config.system_prompt),
-        UserMessage(content=user_message)
     ]
+    # Add optional context messages (runtime context not in static system prompt)
+    if config.context_messages:
+        messages.extend(config.context_messages)
+    messages.append(UserMessage(content=user_message))
 
     for iteration in range(config.max_iterations):
         # Execute one model call - yields visible text deltas live
         outcome = _StreamOutcome()
-        async for delta in _stream_one_call(config, messages, outcome):
-            # Stream visible text deltas to caller as they arrive
-            yield delta
+        try:
+            async for delta in _stream_one_call(config, messages, outcome):
+                # Stream visible text deltas to caller as they arrive
+                yield delta
+        except Exception as e:
+            # If the stream raises mid-turn, surface the error directly
+            # rather than masking it with AttributeError on outcome.result
+            logger.error(f"Stream error during model call (iteration {iteration}): {e}", exc_info=True)
+            raise
 
         # After streaming completes, get the result for control flow
         result = outcome.result
+        if result is None:
+            # This should not happen, but if it does, raise a clear error
+            raise RuntimeError("Stream completed but no result was captured")
 
         # Add assistant message to history (full message for coherence)
         messages.append(result.assistant_message)

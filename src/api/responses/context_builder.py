@@ -28,6 +28,7 @@ def build_context_string(
     message_history_str: str,
     message_content: str,
     date_context_str: Optional[str],
+    currency_context: Optional[str],
     module_name: Optional[str],
     module_response: Optional[str],
     unresolved_triggers: list[str],
@@ -35,15 +36,16 @@ def build_context_string(
 ) -> str:
     """
     Build the context string for the AI agent.
-    
+
     Constructs the prompt context including summaries, message history,
-    current message, date context, and module information.
-    
+    current message, date context, currency context, and module information.
+
     Args:
         summaries_str: Formatted summaries string
         message_history_str: JSON string of message history
         message_content: Current user message content
         date_context_str: Optional date context string
+        currency_context: Optional currency context string (e.g., "display_currency: USD")
         module_name: Optional name of the invoked module
         module_response: Optional response from the invoked module
         unresolved_triggers: List of unresolved module triggers
@@ -53,8 +55,10 @@ def build_context_string(
     Returns:
         str: The complete context string for the agent
     """
-    # Build date context section if available
+    # Build context sections if available
     date_context_section = f"\n\n        {date_context_str}" if date_context_str else ""
+    currency_context_section = f"\n\n        {currency_context}" if currency_context else ""
+    combined_context_section = date_context_section + currency_context_section
 
     # Module invocations that fail arrive as "ERROR: ..." strings (see
     # preprocessing.py). Instead of presenting the internal error text as module
@@ -71,7 +75,7 @@ def build_context_string(
 
         [CURRENT MESSAGE]
         User message:
-        {message_content}{date_context_section}
+        {message_content}{combined_context_section}
 
         [MODULE UNAVAILABLE]
         A specialist module was invoked for this request but failed and is currently unavailable.
@@ -109,7 +113,7 @@ def build_context_string(
 
         [CURRENT MESSAGE]
         User message:
-        {message_content}{date_context_section}
+        {message_content}{combined_context_section}
 
         [MODULE RESPONSE]
         A specialized module has processed this request and returned the following response:
@@ -139,6 +143,6 @@ def build_context_string(
 
         [CURRENT MESSAGE]
         Current message to respond to:
-        {message_content}{date_context_section}{module_not_found_section}"""
+        {message_content}{combined_context_section}{module_not_found_section}"""
     
     return context_str
