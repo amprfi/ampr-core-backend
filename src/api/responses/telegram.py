@@ -108,6 +108,7 @@ async def generate_telegram_response(context: ResponseContext) -> list[str]:
             preprocess_result.message_history_str,
             preprocess_result.message_content,
             preprocess_result.date_context_str,
+            preprocess_result.currency_context,
             preprocess_result.module_name,
             preprocess_result.module_response,
             preprocess_result.unresolved_triggers,
@@ -142,7 +143,6 @@ async def generate_telegram_response(context: ResponseContext) -> list[str]:
                         invoked_modules=[preprocess_result.module_name] if preprocess_result.module_name else [],
                         channel=context.channel,
                         telegram_id=context.telegram_id,
-                        currency_context=preprocess_result.currency_context,
                     )
                     result = await amprChat_agent.run(
                         context_str,

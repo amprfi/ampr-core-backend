@@ -11,14 +11,17 @@ import httpx
 import os
 import logging
 
+from .mistral_helpers import (
+    get_shared_client,
+    build_messages,
+    extract_text_from_content,
+    MODEL_SMALL,
+)
+
 logger = logging.getLogger(__name__)
 
 TIINGO_BASE_URL = "https://api.tiingo.com/tiingo/fx"
 TIINGO_API_KEY = os.environ.get("TIINGO_API_KEY", "")
-
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
-MODEL = "mistral-small-latest"
 
 PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/currency_converter.md").read_text()
 
@@ -87,42 +90,19 @@ async def convert_currency(module_response: str, target_currency: str) -> str:
         f"Text to convert:\n{module_response}"
     )
 
-    messages = [
-        {"role": "system", "content": PROMPT_TEMPLATE},
-        {"role": "user", "content": user_content},
-    ]
-
-    body = {
-        "model": MODEL,
-        "messages": messages,
-        "reasoning_effort": "high",
-    }
+    messages = build_messages(PROMPT_TEMPLATE, user_content)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                MISTRAL_API_URL,
-                headers={
-                    "Authorization": f"Bearer {MISTRAL_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        client = get_shared_client()
+        response = await client.chat.complete_async(
+            model=MODEL_SMALL,
+            messages=messages,
+            temperature=0.7,
+            reasoning_effort="high",
+        )
 
-        content = data["choices"][0]["message"]["content"]
-
-        # With reasoning enabled, Mistral returns content as a list of blocks
-        # (thinking + text) rather than a plain string. Extract just the text.
-        if isinstance(content, list):
-            text_parts = [
-                block["text"] for block in content
-                if isinstance(block, dict) and block.get("type") == "text"
-            ]
-            converted = "\n".join(text_parts)
-        else:
-            converted = content
+        content = response.choices[0].message.content
+        converted = extract_text_from_content(content)
 
         logger.info(f"Successfully converted response to {target_currency}")
         return converted

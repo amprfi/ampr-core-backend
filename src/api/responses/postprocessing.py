@@ -13,8 +13,8 @@ import logging
 from datetime import datetime
 from typing import Optional, Sequence
 
-from ...agents.extractor import get_extractor_agent, ExtractorContext, HORIZON_MAP, KNOWLEDGE_MAP
-from ...agents.summarizer import get_summarizer_agent, SummarizerContext
+from ...agents.extractor import get_extractor_agent, HORIZON_MAP, KNOWLEDGE_MAP
+from ...agents.summarizer import get_summarizer_agent
 from ...clients.async_convex_client import AsyncConvexClient, get_async_client
 from .context import ResponseContext
 
@@ -172,29 +172,20 @@ async def _manage_chat_memory(async_client: AsyncConvexClient, chat_id: Optional
 
             # Run Summarizer and Extractor agents in parallel
             summarizer_agent = get_summarizer_agent()
-            summarizer_ctx = SummarizerContext()
-
             extractor_agent = get_extractor_agent()
-            extractor_ctx = ExtractorContext(
-                convex_client=get_async_client(),
-                user_id=user_id
-            )
 
-            summary_result, extraction_result = await asyncio.gather(
+            summary_content, extracted_profile = await asyncio.gather(
                 summarizer_agent.run(
-                    f"Please summarize these messages:\n\n{conversation_text}",
-                    deps=summarizer_ctx
+                    f"Please summarize these messages:\n\n{conversation_text}"
                 ),
                 extractor_agent.run(
                     f"Extract user profile information from these messages:\n\n{conversation_text}",
-                    deps=extractor_ctx
+                    convex_client=get_async_client(),
+                    user_id=user_id
                 ),
             )
 
-            summary_content = summary_result.output
             logger.info(f"Generated summary for chat {chat_id}: {summary_content[:50]}...")
-
-            extracted_profile = extraction_result.output
             logger.info(f"Extracted profile data for user {user_id}")
 
             # Update user profile if any non-null values were extracted
@@ -310,17 +301,12 @@ async def _watch_profile(context: ResponseContext, message: str):
     try:
 
         extractor_agent = get_extractor_agent()
-        extractor_ctx = ExtractorContext(
+
+        extracted = await extractor_agent.run(
+            f"Extract user profile information from this single message. Only extract fields where the user clearly reveals personal information about themselves:\n\n{message}",
             convex_client=context.async_convex_client,
             user_id=context.user_id
         )
-
-        result = await extractor_agent.run(
-            f"Extract user profile information from this single message. Only extract fields where the user clearly reveals personal information about themselves:\n\n{message}",
-            deps=extractor_ctx
-        )
-
-        extracted = result.output
 
         # Skip if no watchable fields were detected
         if not any([extracted.country_name, extracted.preferred_currency, extracted.email, extracted.phone]):

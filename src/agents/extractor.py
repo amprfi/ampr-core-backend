@@ -1,18 +1,18 @@
 from pathlib import Path
-from pydantic_ai import Agent, RunContext
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Union
 from convex import ConvexClient
 import logging
 
 from ..clients.async_convex_client import AsyncConvexClient
+from .mistral_helpers import (
+    get_shared_client,
+    build_messages,
+    complete_json_schema,
+    MODEL_SMALL,
+)
 
 logger = logging.getLogger(__name__)
-
-class ExtractorContext(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    convex_client: Union[ConvexClient, AsyncConvexClient]
-    user_id: str
 
 HORIZON_MAP = {
     "E_1_5": "1-5",
@@ -34,6 +34,7 @@ KNOWLEDGE_MAP = {
     "intermediate": "intermediate",
     "advanced": "advanced",
 }
+
 
 class ExtractedProfile(BaseModel):
     inferred_investment_horizon: Optional[str] = Field(
@@ -75,30 +76,32 @@ class ExtractedProfile(BaseModel):
         description="Phone number mentioned by the user"
     )
 
-agent = Agent(
-    "mistral:mistral-small-latest",
-    deps_type=ExtractorContext,
-    output_type=ExtractedProfile
-)
 
-@agent.tool
-async def get_current_profile(ctx: RunContext[ExtractorContext]) -> str:
+PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/extractor.md").read_text()
+
+
+async def _get_current_profile_context(
+    convex_client: Union[ConvexClient, AsyncConvexClient],
+    user_id: str
+) -> str:
     """
-    Get the current inferred profile data for this user to avoid contradictions.
+    Get the current inferred profile data for this user as context string.
+
+    This replaces the pydantic-ai tool with a direct DB fetch, injected into the prompt.
     """
-    logger.info(f"Tool called: get_current_profile for user_id={ctx.deps.user_id}")
+    logger.info(f"Fetching current profile context for user_id={user_id}")
     try:
-        client = ctx.deps.convex_client
+        client = convex_client
         profile_summary = []
 
         # Fetch investment preferences
         if isinstance(client, AsyncConvexClient):
             result = await client.query("profiles:getInvestmentPreferences", {
-                "userId": ctx.deps.user_id
+                "userId": user_id
             })
         else:
             result = client.query("profiles:getInvestmentPreferences", {
-                "userId": ctx.deps.user_id
+                "userId": user_id
             })
 
         if result:
@@ -115,13 +118,13 @@ async def get_current_profile(ctx: RunContext[ExtractorContext]) -> str:
 
         # Fetch watchable profile fields (currency, country, email, phone)
         if isinstance(client, AsyncConvexClient):
-            currency_data = await client.query("profiles:getUserCurrency", {"userId": ctx.deps.user_id})
-            country_data = await client.query("profiles:getUserCountry", {"userId": ctx.deps.user_id})
-            user_data = await client.query("users:getUser", {"userId": ctx.deps.user_id})
+            currency_data = await client.query("profiles:getUserCurrency", {"userId": user_id})
+            country_data = await client.query("profiles:getUserCountry", {"userId": user_id})
+            user_data = await client.query("users:getUser", {"userId": user_id})
         else:
-            currency_data = client.query("profiles:getUserCurrency", {"userId": ctx.deps.user_id})
-            country_data = client.query("profiles:getUserCountry", {"userId": ctx.deps.user_id})
-            user_data = client.query("users:getUser", {"userId": ctx.deps.user_id})
+            currency_data = client.query("profiles:getUserCurrency", {"userId": user_id})
+            country_data = client.query("profiles:getUserCountry", {"userId": user_id})
+            user_data = client.query("users:getUser", {"userId": user_id})
 
         if currency_data and currency_data.get("preferred_currency"):
             profile_summary.append(f"Preferred currency: {currency_data['preferred_currency']}")
@@ -137,18 +140,84 @@ async def get_current_profile(ctx: RunContext[ExtractorContext]) -> str:
         if not profile_summary:
             return "No existing profile data found. All fields are empty."
 
-        logger.info(f"Tool result: get_current_profile returned {len(profile_summary)} fields")
+        logger.info(f"Profile context: {len(profile_summary)} fields")
         return "\n".join(profile_summary)
     except Exception as e:
         error_msg = f"Error retrieving current profile: {str(e)}"
-        logger.error(f"Tool error: get_current_profile - {error_msg}")
+        logger.error(f"Profile context fetch error: {error_msg}")
         return error_msg
 
-PROMPT_TEMPLATE = (Path(__file__).parent / "prompts/extractor.md").read_text()
 
-@agent.system_prompt
-def get_system_prompt(ctx: RunContext[ExtractorContext]) -> str:
-    return PROMPT_TEMPLATE
+class ExtractorAgent:
+    """
+    Extractor agent using Mistral SDK with structured JSON output.
 
-def get_extractor_agent():
-    return agent
+    Extracts user profile information from messages. Prefetches current profile
+    context and injects it into the prompt instead of using a tool loop.
+    """
+
+    def __init__(self):
+        self.client = get_shared_client()
+        self.system_prompt = PROMPT_TEMPLATE
+        self.schema = ExtractedProfile.model_json_schema()
+
+    async def run(
+        self,
+        message: str,
+        convex_client: Union[ConvexClient, AsyncConvexClient],
+        user_id: str,
+    ) -> ExtractedProfile:
+        """
+        Run the extractor on the given message with profile context.
+
+        Args:
+            message: The message to extract profile info from
+            convex_client: Convex client for fetching profile data
+            user_id: The user ID for fetching profile data
+
+        Returns:
+            ExtractedProfile with extracted fields
+        """
+        # Prefetch current profile context
+        profile_context = await _get_current_profile_context(convex_client, user_id)
+
+        # Inject profile context into the user message
+        user_content = f"Current profile:\n{profile_context}\n\nMessage to analyze:\n{message}"
+
+        messages = build_messages(self.system_prompt, user_content)
+
+        try:
+            result_dict = await complete_json_schema(
+                client=self.client,
+                model=MODEL_SMALL,
+                messages=messages,
+                schema=self.schema,
+                temperature=0.1,
+                reasoning_effort="none",
+            )
+
+            extracted = ExtractedProfile(**result_dict)
+            logger.info(f"Extractor parsed result with {len(result_dict)} fields")
+            return extracted
+
+        except Exception as e:
+            logger.error(f"Extractor failed: {e}", exc_info=True)
+            # Graceful fallback: return empty profile
+            return ExtractedProfile()
+
+
+# Singleton instance
+_agent_instance: ExtractorAgent | None = None
+
+
+def get_extractor_agent() -> ExtractorAgent:
+    """
+    Get an extractor agent instance.
+
+    Returns:
+        Singleton ExtractorAgent instance
+    """
+    global _agent_instance
+    if _agent_instance is None:
+        _agent_instance = ExtractorAgent()
+    return _agent_instance

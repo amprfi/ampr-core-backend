@@ -13,6 +13,7 @@ Routing priority:
 2. LLM classification for natural-language routing (when no mention is present)
 """
 
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -20,8 +21,14 @@ from typing import TYPE_CHECKING, Optional
 
 from pydantic import BaseModel
 
+from src.agents.mistral_helpers import (
+    get_shared_client,
+    build_messages,
+    complete_json_schema,
+    MODEL_SMALL,
+)
+
 if TYPE_CHECKING:
-    from pydantic_ai import Agent
     from .registry import ModuleRegistry
 
 logger = logging.getLogger(__name__)
@@ -31,7 +38,7 @@ logger = logging.getLogger(__name__)
 class RoutingDecision:
     """
     Result of module routing decision.
-    
+
     Attributes:
         modules: List of module names to invoke (empty list means no specialist modules)
         method: The routing method used - "mention", "llm", or "none"
@@ -49,20 +56,20 @@ class RoutingDecision:
 def _extract_mentions(message: str) -> list[str]:
     """
     Extract all &mention triggers from a message.
-    
+
     Preserves order from the user message and deduplicates repeated mentions.
     Avoids obvious substring false positives by matching word boundaries.
-    
+
     Args:
         message: The user message to scan
-        
+
     Returns:
         List of unique &mention triggers in order of first appearance
     """
     # Find all &word patterns (word = alphanumeric + underscore + hyphen + colon)
     # This matches &defianalyst, &oracle, &lens:something, &proof-of-words, etc.
     mentions = re.findall(r'&([\w:\-]+)', message)
-    
+
     # Deduplicate while preserving order
     seen = set()
     unique_mentions = []
@@ -70,7 +77,7 @@ def _extract_mentions(message: str) -> list[str]:
         if mention not in seen:
             seen.add(mention)
             unique_mentions.append(mention)
-    
+
     return [f"&{m}" for m in unique_mentions]
 
 
@@ -109,35 +116,35 @@ def _filter_substring_false_positives(mentions: list[str], registered_triggers: 
     return filtered
 
 
-def route_to_modules(
+async def route_to_modules(
     message: str,
     registry: "ModuleRegistry",
     enable_llm_classification: bool = True,
 ) -> RoutingDecision:
     """
     Route a user message to the appropriate specialist modules.
-    
+
     This is the single source of truth for module routing. It uses:
     1. Deterministic mention detection first (if &mention triggers are present)
     2. LLM classification second (for natural-language routing when no mention)
-    
+
     Args:
         message: The user message to route
         registry: The ModuleRegistry containing all available modules
         enable_llm_classification: Whether to use LLM classification for messages
             without explicit mentions (default: True). Set to False for testing
             or when LLM is unavailable.
-    
+
     Returns:
         RoutingDecision with the selected modules and routing metadata
     """
     # Step 1: Extract all mentions from the message
     all_mentions = _extract_mentions(message)
-    
+
     if not all_mentions:
         # No mentions found - try LLM classification
         if enable_llm_classification:
-            return _classify_with_llm(message, registry)
+            return await _classify_with_llm(message, registry)
         else:
             logger.info("No module triggers detected and LLM classification disabled, routing to general chat")
             return RoutingDecision(
@@ -146,21 +153,21 @@ def route_to_modules(
                 confidence=0.0,
                 rationale="No module triggers detected and LLM classification disabled"
             )
-    
+
     # Step 2: Separate known and unknown triggers
     registered_triggers = set(registry.triggers.keys())
     known_mentions = []
     unknown_mentions = []
-    
+
     for mention in all_mentions:
         if mention in registered_triggers:
             known_mentions.append(mention)
         else:
             unknown_mentions.append(mention)
-    
+
     # Step 3: Filter out substring false positives from known mentions
     known_mentions = _filter_substring_false_positives(known_mentions, registered_triggers)
-    
+
     # Step 4: Resolve mention names to module names
     # (triggers map to module names in the registry)
     resolved_modules = []
@@ -168,20 +175,20 @@ def route_to_modules(
         module_name = registry.triggers.get(mention)
         if module_name:
             resolved_modules.append(module_name)
-    
+
     # Log the routing decision
     if resolved_modules:
         logger.info(
             f"Mention-based routing: message contains {all_mentions}, "
             f"resolved to modules {resolved_modules}"
         )
-    
+
     if unknown_mentions:
         logger.warning(
             f"Unknown module triggers detected: {unknown_mentions}. "
             f"These will be surfaced to the user."
         )
-    
+
     # Step 5: Return the decision
     if resolved_modules:
         return RoutingDecision(
@@ -195,7 +202,7 @@ def route_to_modules(
         # Only unknown mentions - no known modules to invoke
         if enable_llm_classification:
             # Still try LLM classification as a fallback
-            llm_decision = _classify_with_llm(message, registry)
+            llm_decision = await _classify_with_llm(message, registry)
             # Combine unresolved triggers with LLM result
             return RoutingDecision(
                 modules=llm_decision.modules,
@@ -221,34 +228,30 @@ class ClassificationResult(BaseModel):
     rationale: str
 
 
-_classifier_instance: Optional["Agent"] = None
+# Global state for the classifier (system prompt depends on registry state)
+_classifier_system_prompt: Optional[str] = None
+_classifier_registry_hash: Optional[str] = None
 
 
-def _get_classifier(registry: "ModuleRegistry") -> "Agent":
+def _build_classifier_system_prompt(registry: "ModuleRegistry") -> str:
     """
-    Return a lazily-initialized, singleton classification Agent.
+    Build the system prompt for the LLM classifier from the registry.
 
-    The agent, its output type, and its system prompt are built once on first
-    use from the registry's currently-enabled modules and then reused for all
-    subsequent classification calls. This avoids re-instantiating the Agent and
-    rebuilding the prompt on every classification.
+    This creates a prompt that describes all available modules to the LLM
+    so it can classify messages appropriately.
     """
-    global _classifier_instance
-    if _classifier_instance is None:
-        from pydantic_ai import Agent
+    # Build the module description block from the registry's enabled modules.
+    module_descriptions = []
+    for mod in registry.list_modules():
+        name = mod.get("name", "")
+        description = mod.get("description", "")
+        intents = mod.get("intents", [])
+        module_descriptions.append(f"{name}: {description}")
+        if intents:
+            module_descriptions.append(f"  Intents: {', '.join(intents[:3])}")
+    modules_context = "\n".join(module_descriptions)
 
-        # Build the module description block from the registry's enabled modules.
-        module_descriptions = []
-        for mod in registry.list_modules():
-            name = mod.get("name", "")
-            description = mod.get("description", "")
-            intents = mod.get("intents", [])
-            module_descriptions.append(f"{name}: {description}")
-            if intents:
-                module_descriptions.append(f"  Intents: {', '.join(intents[:3])}")
-        modules_context = "\n".join(module_descriptions)
-
-        system_prompt = f"""You are a message classifier for Ampersand's specialist modules.
+    system_prompt = f"""You are a message classifier for Ampersand's specialist modules.
 
 Available modules:
 {modules_context}
@@ -266,30 +269,51 @@ Guidelines:
 - If the message is a general financial question or greeting, return an empty list
 - If the message asks about alerts, watchlist, or profile, return an empty list (these are handled by built-in tools)
 """
-
-        _classifier_instance = Agent(
-            "mistral:mistral-small-3.5",  # Small/fast model for classification
-            output_type=ClassificationResult,
-            system_prompt=system_prompt,
-        )
-
-    return _classifier_instance
+    return system_prompt
 
 
-def _classify_with_llm(
+def _get_registry_hash(registry: "ModuleRegistry") -> str:
+    """
+    Compute a hash of the registry's module names for cache invalidation.
+    
+    This is more robust than using id(registry) which can be reused after GC.
+    We hash the sorted module names to detect when modules have been added/removed.
+    """
+    module_names = sorted(registry.modules.keys())
+    return hashlib.md5(",".join(module_names).encode()).hexdigest()
+
+
+def _get_classifier_system_prompt(registry: "ModuleRegistry") -> str:
+    """
+    Get the classifier system prompt, rebuilding if registry has changed.
+
+    We track a hash of module names to detect when modules have been added/removed.
+    This is more robust than using id(registry) which can be reused after GC.
+    """
+    global _classifier_system_prompt, _classifier_registry_hash
+
+    current_hash = _get_registry_hash(registry)
+    if _classifier_system_prompt is None or _classifier_registry_hash != current_hash:
+        _classifier_system_prompt = _build_classifier_system_prompt(registry)
+        _classifier_registry_hash = current_hash
+
+    return _classifier_system_prompt
+
+
+async def _classify_with_llm(
     message: str,
     registry: "ModuleRegistry",
 ) -> RoutingDecision:
     """
     Classify a message using LLM to determine which specialist module(s) to invoke.
-    
+
     This is used when no explicit &mention triggers are present in the message.
-    Uses the lazily-initialized classifier singleton (see _get_classifier).
-    
+    Uses Mistral SDK with structured JSON output for classification.
+
     Args:
         message: The user message to classify
         registry: The ModuleRegistry containing all available modules
-    
+
     Returns:
         RoutingDecision with LLM-classified modules
     """
@@ -304,16 +328,32 @@ def _classify_with_llm(
             rationale="No enabled modules available"
         )
 
-    classifier = _get_classifier(registry)
-
     try:
         logger.info(f"Running LLM classification for message: {message[:100]}...")
 
-        result = classifier.run(
-            f"Classify this message and determine the most appropriate specialist module(s):\n\n{message}"
+        # Build the system prompt from the registry
+        system_prompt = _get_classifier_system_prompt(registry)
+
+        # Use structured output with json_schema strict mode
+        schema = ClassificationResult.model_json_schema()
+
+        client = get_shared_client()
+
+        # Build messages for the classifier
+        user_content = f"Classify this message and determine the most appropriate specialist module(s):\n\n{message}"
+        messages = build_messages(system_prompt, user_content)
+
+        # Execute with structured output
+        result_dict = await complete_json_schema(
+            client=client,
+            model=MODEL_SMALL,  # Use small model for classification
+            messages=messages,
+            schema=schema,
+            temperature=0.0,
+            reasoning_effort="none",
         )
 
-        classification: ClassificationResult = result.output  # type: ignore[possibly-unbound]
+        classification = ClassificationResult(**result_dict)
 
         # Validate the returned module names against registered modules
         registered_module_names = set(registry.modules.keys())
@@ -364,16 +404,16 @@ def detect_module_triggers(
 ) -> list[str]:
     """
     Detect all module triggers in a message.
-    
+
     Extracts mentions, keeps only registered triggers, and applies the same
     substring filtering used by route_to_modules. This is the single source of
     truth used by ModuleRegistry.detect_module_triggers(). Preserves order and
     deduplicates (deduplication happens inside _extract_mentions).
-    
+
     Args:
         message: The user message to scan
         registry: The ModuleRegistry containing all available modules
-    
+
     Returns:
         List of registered trigger strings found in the message (in order, deduplicated)
     """

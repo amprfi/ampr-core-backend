@@ -3,17 +3,17 @@ from pydantic import BaseModel, Field
 from datetime import datetime, date
 from calendar import monthrange
 from typing import Optional
-import httpx
-import json
 import logging
-import os
 import re
 
-logger = logging.getLogger(__name__)
+from .mistral_helpers import (
+    get_shared_client,
+    build_messages,
+    complete_json_schema,
+    MODEL_SMALL,
+)
 
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
-MODEL = "mistral-small-latest"
+logger = logging.getLogger(__name__)
 
 # Regex pattern to detect date-like phrases (used for conditional execution)
 DATE_PATTERN = re.compile(
@@ -39,12 +39,12 @@ class DateContext(BaseModel):
         default_factory=list,
         description="List of date references found in the message. Empty if no date references."
     )
-    
+
     def to_context_string(self) -> Optional[str]:
         """Convert to a context string for the main agent, or None if no references."""
         if not self.date_references:
             return None
-        
+
         lines = ["[DATE CONTEXT]"]
         for ref in self.date_references:
             if ref.start_date == ref.end_date:
@@ -54,14 +54,51 @@ class DateContext(BaseModel):
         return "\n".join(lines)
 
 
-class DatePreprocessorContext(BaseModel):
-    pass
+class DatePreprocessorAgent:
+    """
+    Date preprocessor using Mistral SDK with structured JSON output.
 
+    Replaces raw httpx calls with direct Mistral SDK usage.
+    Uses response_format: json_schema with strict: true.
+    """
 
-class _DatePreprocessorResult:
-    """Wrapper to maintain interface compatibility with pydantic-ai's RunResult."""
-    def __init__(self, output: DateContext):
-        self.output = output
+    def __init__(self):
+        self.client = get_shared_client()
+        self.schema = DateContext.model_json_schema()
+
+    async def run(self, message: str) -> DateContext:
+        """
+        Run the date preprocessor on the given message.
+
+        Args:
+            message: The user message to analyze for date references
+
+        Returns:
+            DateContext with parsed date references
+        """
+        calendar_context = _build_calendar_context(date.today())
+        system_prompt = f"{calendar_context}\n\n{PROMPT_TEMPLATE}"
+
+        messages = build_messages(system_prompt, message)
+
+        try:
+            result_dict = await complete_json_schema(
+                client=self.client,
+                model=MODEL_SMALL,
+                messages=messages,
+                schema=self.schema,
+                temperature=0.7,
+                reasoning_effort="high",
+            )
+
+            date_context = DateContext(**result_dict)
+            logger.info(f"Date preprocessor resolved {len(date_context.date_references)} reference(s)")
+            return date_context
+
+        except Exception as e:
+            logger.error(f"Date preprocessor error: {e}", exc_info=True)
+            # Graceful fallback: return empty context
+            return DateContext()
 
 
 def _build_calendar_context(today: date) -> str:
@@ -106,61 +143,23 @@ def _build_calendar_context(today: date) -> str:
     return "\n".join(lines)
 
 
-class DatePreprocessorAgent:
-    """Date preprocessor using direct Mistral API calls with reasoning."""
+# Singleton instance
+_agent_instance: DatePreprocessorAgent | None = None
 
-    async def run(self, message: str, deps: DatePreprocessorContext = None) -> _DatePreprocessorResult:
-        calendar_context = _build_calendar_context(date.today())
-        system_prompt = f"{calendar_context}\n\n{PROMPT_TEMPLATE}"
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message},
-        ]
+def get_date_preprocessor_agent() -> DatePreprocessorAgent:
+    """
+    Get a date preprocessor agent instance.
 
-        body = {
-            "model": MODEL,
-            "messages": messages,
-            "reasoning_effort": "high",
-            "response_format": {"type": "json_object"},
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    MISTRAL_API_URL,
-                    headers={
-                        "Authorization": f"Bearer {MISTRAL_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-
-            content = data["choices"][0]["message"]["content"]
-            # Mistral may return content as either a string or a list of typed chunks
-            # (TextChunk, ThinkChunk, ...) when reasoning is enabled. Extract the text.
-            if isinstance(content, list):
-                content = "".join(
-                    chunk.get("text", "")
-                    for chunk in content
-                    if isinstance(chunk, dict) and chunk.get("type") == "text"
-                )
-            parsed = json.loads(content)
-            date_context = DateContext(**parsed)
-            logger.info(f"Date preprocessor resolved {len(date_context.date_references)} reference(s)")
-            return _DatePreprocessorResult(output=date_context)
-
-        except Exception as e:
-            logger.error(f"Date preprocessor error: {e}", exc_info=True)
-            return _DatePreprocessorResult(output=DateContext())
+    Returns:
+        Singleton DatePreprocessorAgent instance
+    """
+    global _agent_instance
+    if _agent_instance is None:
+        _agent_instance = DatePreprocessorAgent()
+    return _agent_instance
 
 
 def has_date_references(message: str) -> bool:
     """Check if a message likely contains date references (quick regex check)."""
     return bool(DATE_PATTERN.search(message))
-
-
-def get_date_preprocessor_agent():
-    return DatePreprocessorAgent()
