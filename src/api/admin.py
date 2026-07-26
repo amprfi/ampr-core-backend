@@ -17,7 +17,6 @@ Organized by domain:
 
 from __future__ import annotations
 
-import os
 import time
 import logging
 from typing import List, Dict, Any, Optional
@@ -29,6 +28,12 @@ from convex import ConvexError
 
 from ..middleware.auth import require_admin_key
 from ..clients.convex_client import get_client
+from ..agents.mistral_helpers import (
+    get_shared_client,
+    build_messages,
+    extract_text_from_content,
+    MODEL_SMALL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -303,9 +308,7 @@ async def get_version(_: None = Depends(require_admin_key)):
     }
 
 
-MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
-
+# Models tested in the latency diagnostic
 MODELS = [
     "mistral-small-latest",
     "mistral-large-latest",
@@ -313,6 +316,7 @@ MODELS = [
 
 TEST_PROMPT = "Reply with exactly one word: hello."
 
+# Dummy tool schemas used to test tool-calling latency
 DUMMY_TOOLS = [
     {
         "type": "function",
@@ -343,55 +347,61 @@ DUMMY_TOOLS = [
 
 @router.get("/diagnostics/mistral-latency", status_code=status.HTTP_200_OK)
 async def test_mistral_latency(_: None = Depends(require_admin_key)):
-    """Test Mistral API response latency across models."""
+    """Test Mistral API response latency across models.
+
+    Uses the shared Mistral SDK client (see AMPRFI-120) instead of raw
+    httpx calls. Preserves the per-model, no-tools, and dummy-tools
+    latency result shape.
+    """
     results = []
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        for model in MODELS:
-            headers = {
-                "Authorization": f"Bearer {MISTRAL_API_KEY}",
-                "Content-Type": "application/json",
-            }
+    try:
+        client = get_shared_client()
+    except ValueError:
+        logger.error("MISTRAL_API_KEY not configured; latency test unavailable")
+        return {"results": [], "error": "MISTRAL_API_KEY not configured"}
 
-            for mode, tools in [("no_tools", None), ("with_tools", DUMMY_TOOLS)]:
-                payload = {
+    for model in MODELS:
+        for mode, tools in [("no_tools", None), ("with_tools", DUMMY_TOOLS)]:
+            start = time.monotonic()
+            try:
+                kwargs: Dict[str, Any] = {
                     "model": model,
                     "messages": [{"role": "user", "content": TEST_PROMPT}],
                     "max_tokens": 10,
                 }
-                if tools:
-                    payload["tools"] = tools
+                # In no_tools mode, omit the tools argument entirely so the
+                # SDK does not serialize "tools": null. In with_tools mode,
+                # pass the dummy tool schemas.
+                if tools is not None:
+                    kwargs["tools"] = tools
+                response = await client.chat.complete_async(**kwargs)
+                elapsed = round(time.monotonic() - start, 3)
 
-                start = time.monotonic()
-                try:
-                    resp = await client.post(MISTRAL_API_URL, json=payload, headers=headers)
-                    elapsed = round(time.monotonic() - start, 3)
-                    resp_data = resp.json()
+                reply = ""
+                resolved_model = getattr(response, "model", "unknown")
+                if response.choices:
+                    content = response.choices[0].message.content
+                    reply = extract_text_from_content(content)
 
-                    reply = ""
-                    resolved_model = resp_data.get("model", "unknown")
-                    if resp.status_code == 200:
-                        choices = resp_data.get("choices", [])
-                        if choices:
-                            reply = choices[0].get("message", {}).get("content", "")
-
-                    results.append({
-                        "model_requested": model,
-                        "model_resolved": resolved_model,
-                        "mode": mode,
-                        "status": resp.status_code,
-                        "latency_seconds": elapsed,
-                        "reply": reply,
-                    })
-                except Exception as e:
-                    elapsed = round(time.monotonic() - start, 3)
-                    results.append({
-                        "model_requested": model,
-                        "mode": mode,
-                        "status": "error",
-                        "latency_seconds": elapsed,
-                        "error": str(e),
-                    })
+                results.append({
+                    "model_requested": model,
+                    "model_resolved": resolved_model,
+                    "mode": mode,
+                    "status": 200,
+                    "latency_seconds": elapsed,
+                    "reply": reply,
+                })
+            except Exception as e:
+                elapsed = round(time.monotonic() - start, 3)
+                logger.error(f"Mistral latency test failed for model={model} mode={mode}: {e}", exc_info=True)
+                results.append({
+                    "model_requested": model,
+                    "mode": mode,
+                    "status": "error",
+                    "latency_seconds": elapsed,
+                    "error": str(e),
+                })
 
     return {"results": results}
 
@@ -654,43 +664,49 @@ async def fetch_and_extract(url: str) -> str:
     return extracted
 
 
-async def clean_with_mistral(raw_text: str) -> str:
-    """Use a one-shot Mistral call to clean extracted content into well-structured markdown."""
-    api_key = os.getenv("MISTRAL_API_KEY")
-    if not api_key:
-        raise ValueError("MISTRAL_API_KEY environment variable not set")
+# System prompt for the markdown cleaner
+CLEANER_SYSTEM_PROMPT = (
+    "You are a content formatter. You receive raw text extracted from a webpage. "
+    "Your job is to return ONLY the article/essay content as clean markdown. "
+    "Remove any navigation, sidebars, footers, ads, cookie notices, author bios, "
+    "social sharing prompts, related article links, and other non-article text. "
+    "Preserve the article's structure (headings, lists, emphasis, blockquotes). "
+    "Do not add commentary. Return only the cleaned markdown."
+)
 
-    async with httpx.AsyncClient(timeout=60.0) as http_client:
-        response = await http_client.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            },
-            json={
-                "model": "mistral-small-latest",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a content formatter. You receive raw text extracted from a webpage. "
-                            "Your job is to return ONLY the article/essay content as clean markdown. "
-                            "Remove any navigation, sidebars, footers, ads, cookie notices, author bios, "
-                            "social sharing prompts, related article links, and other non-article text. "
-                            "Preserve the article's structure (headings, lists, emphasis, blockquotes). "
-                            "Do not add commentary. Return only the cleaned markdown."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": raw_text,
-                    },
-                ],
-            },
+
+async def clean_with_mistral(raw_text: str) -> str:
+    """Use a one-shot Mistral call to clean extracted content into well-structured markdown.
+
+    Uses the shared Mistral SDK client (see AMPRFI-120) instead of raw httpx.
+
+    Fail-closed behavior: on any failure — missing API key, SDK/API error, or
+    empty/whitespace-only cleaned output — this function raises an exception
+    rather than returning a fallback. Callers (e.g. ``_run_ingestion``) should
+    catch the exception, log it, and abort ingestion without calling
+    ``lenses:ingestFromText``.
+    """
+    client = get_shared_client()  # raises ValueError if MISTRAL_API_KEY not set
+
+    messages = build_messages(CLEANER_SYSTEM_PROMPT, raw_text)
+
+    response = await client.chat.complete_async(
+        model=MODEL_SMALL,
+        messages=messages,
+        temperature=0.3,
+        reasoning_effort="none",
+    )
+
+    content = response.choices[0].message.content
+    cleaned = extract_text_from_content(content)
+
+    if not cleaned or not cleaned.strip():
+        raise RuntimeError(
+            "Mistral cleaning returned empty or whitespace-only content"
         )
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+
+    logger.info(f"Cleaned markdown: {len(cleaned)} chars")
+    return cleaned
 
 
 async def _run_ingestion(request: IngestDocumentRequest):
