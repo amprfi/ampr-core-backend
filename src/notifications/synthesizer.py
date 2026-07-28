@@ -9,9 +9,9 @@ Uses the shared Mistral SDK client (see AMPRFI-120 / AMPRFI-126).
 import logging
 
 from ..agents.mistral_helpers import (
-    get_shared_client,
+get_shared_client,
     build_messages,
-    extract_text_from_content,
+    complete_text,
     MODEL_SMALL,
 )
 
@@ -72,15 +72,13 @@ async def synthesize_notifications(contents: list[str]) -> str:
 
     try:
         client = get_shared_client()
-        response = await client.chat.complete_async(
+        synthesized = await complete_text(
+            client=client,
             model=MODEL_SMALL,
             messages=messages,
             temperature=_SYNTHESIS_TEMPERATURE,
             reasoning_effort=_SYNTHESIS_REASONING_EFFORT,
         )
-
-        content = response.choices[0].message.content
-        synthesized = extract_text_from_content(content)
 
         # Treat blank output as a synthesis failure so the caller falls back
         # to newline-concatenation rather than delivering an empty message

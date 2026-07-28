@@ -282,7 +282,7 @@ class TestRunnerConfig:
     @pytest.mark.asyncio
     async def test_build_amprchat_config_returns_config(self, talker_context):
         """build_amprchat_config should return a valid RunnerConfig."""
-        with patch('src.agents.amprchat_tools.get_mistral_client'):
+        with patch('src.agents.amprchat_tools.get_shared_client'):
             config = await build_amprchat_config(talker_context)
             assert config.model == AMPCHAT_MODEL
             assert config.reasoning_effort == "high"
@@ -292,7 +292,7 @@ class TestRunnerConfig:
     @pytest.mark.asyncio
     async def test_config_has_no_context_messages(self, talker_context):
         """Config should NOT include context_messages - currency_context is in context string."""
-        with patch('src.agents.amprchat_tools.get_mistral_client'):
+        with patch('src.agents.amprchat_tools.get_shared_client'):
             config = await build_amprchat_config(talker_context)
             # context_messages should be None or empty since currency_context is now in context string
             assert config.context_messages is None or len(config.context_messages) == 0
@@ -416,7 +416,7 @@ class TestCurrencyContext:
     @pytest.mark.asyncio
     async def test_currency_context_in_context_string(self, talker_context):
         """currency_context should be passed via build_context_string, not in config."""
-        with patch('src.agents.amprchat_tools.get_mistral_client'):
+        with patch('src.agents.amprchat_tools.get_shared_client'):
             config = await build_amprchat_config(talker_context)
             # context_messages should be None or empty since currency_context is now in context string
             assert config.context_messages is None or len(config.context_messages) == 0
@@ -471,7 +471,7 @@ class TestIntegration:
         """Test the complete agent run flow with mocked dependencies."""
         agent = get_amprChat_agent()
         
-        with patch('src.agents.amprchat_tools.get_mistral_client') as mock_client, \
+        with patch('src.agents.amprchat_tools.get_shared_client') as mock_client, \
              patch('src.agents.amprchat_tools._build_system_prompt') as mock_prompt, \
              patch('src.agents.amprchat_tools.build_amprchat_tools') as mock_tools, \
              patch('src.agents.amprChat.tool_runner_run') as mock_run:

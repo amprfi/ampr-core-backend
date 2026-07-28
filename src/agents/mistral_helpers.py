@@ -5,6 +5,7 @@ This module provides centralized utilities for:
 - Mistral SDK client creation with retry configuration
 - Response parsing (reasoning chunks, text extraction)
 - Structured output handling with json_schema
+- Text completion helper with explicit model, temperature, reasoning, retry, and fallback behavior
 - Error handling and graceful fallbacks
 """
 
@@ -40,14 +41,25 @@ _RETRY_CONFIG = RetryConfig(
 
 def get_mistral_client() -> Mistral:
     """
-    Get a configured Mistral SDK client with retry configuration.
+    Create a configured Mistral SDK client with retry configuration.
 
-    Returns a singleton client instance with:
-    - API key from MISTRAL_API_KEY environment variable
-    - Retry configuration for handling transient failures
+    This is a factory function that creates a new client instance on each
+    call. It is intended to be used internally by get_shared_client to
+    construct the shared singleton. In-scope SDK callers should use
+    get_shared_client instead of calling this function directly.
 
-    Note: The Mistral SDK handles retries internally via its own configuration.
-    We configure it once at client creation time.
+    The returned client is configured with:
+    - API key from the MISTRAL_API_KEY environment variable
+    - Retry configuration (_RETRY_CONFIG) for handling transient failures
+
+    The Mistral SDK handles retries internally via its own RetryConfig,
+    which is set at client creation time.
+
+    Returns:
+        A new Mistral client instance.
+
+    Raises:
+        ValueError: If MISTRAL_API_KEY is not set.
     """
     api_key = os.environ.get("MISTRAL_API_KEY", "")
     if not api_key:
@@ -223,9 +235,6 @@ def _make_strict_recursive(schema: dict[str, Any]) -> None:
                 _make_strict_recursive(def_schema)
 
 
-
-
-
 async def complete_json_schema(
     client: Mistral,
     model: str,
@@ -291,6 +300,51 @@ async def complete_json_schema(
         raise
 
 
+async def complete_text(
+    client: Mistral,
+    model: str,
+    messages: list[Union[SystemMessage, UserMessage]],
+    temperature: float,
+    reasoning_effort: str,
+    max_tokens: Optional[int] = None,
+) -> str:
+    """
+    Execute a Mistral text completion and return the extracted text.
+
+    This is the shared helper for plain-text completion agents. It:
+    - Uses the SDK client (which handles retries via RetryConfig)
+    - Extracts text from the response content (handles reasoning chunks)
+    - Returns the text string
+
+    Callers are responsible for handling failures (e.g. returning a fallback
+    string) as the appropriate fallback behavior varies by use case.
+
+    Args:
+        client: Mistral SDK client instance
+        model: Model identifier
+        messages: List of message objects (SystemMessage, UserMessage)
+        temperature: Sampling temperature (required, for explicit per-agent control)
+        reasoning_effort: "high" or "none" (required, for explicit per-agent control)
+        max_tokens: Optional maximum tokens
+
+    Returns:
+        Extracted text as a string
+
+    Raises:
+        Exception: On completion failure (caller should handle gracefully)
+    """
+    response = await client.chat.complete_async(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        reasoning_effort=reasoning_effort,
+        max_tokens=max_tokens,
+    )
+
+    content = response.choices[0].message.content
+    return extract_text_from_content(content)
+
+
 # Convenience: pre-configured client for reuse
 _mistral_client: Optional[Mistral] = None
 
@@ -300,7 +354,9 @@ def get_shared_client() -> Mistral:
     Get or create a shared Mistral client instance.
 
     This provides a singleton client for reuse across agents,
-    avoiding repeated client instantiation.
+    avoiding repeated client instantiation. All in-scope SDK callers
+    should use this function instead of calling get_mistral_client()
+    directly.
 
     Returns:
         Configured Mistral client instance

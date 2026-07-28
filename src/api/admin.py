@@ -31,6 +31,7 @@ from ..clients.convex_client import get_client
 from ..agents.mistral_helpers import (
     get_shared_client,
     build_messages,
+    complete_text,
     extract_text_from_content,
     MODEL_SMALL,
 )
@@ -690,15 +691,13 @@ async def clean_with_mistral(raw_text: str) -> str:
 
     messages = build_messages(CLEANER_SYSTEM_PROMPT, raw_text)
 
-    response = await client.chat.complete_async(
+    cleaned = await complete_text(
+        client=client,
         model=MODEL_SMALL,
         messages=messages,
         temperature=0.3,
         reasoning_effort="none",
     )
-
-    content = response.choices[0].message.content
-    cleaned = extract_text_from_content(content)
 
     if not cleaned or not cleaned.strip():
         raise RuntimeError(

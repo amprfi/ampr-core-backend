@@ -14,7 +14,7 @@ import logging
 from .mistral_helpers import (
     get_shared_client,
     build_messages,
-    extract_text_from_content,
+    complete_text,
     MODEL_SMALL,
 )
 
@@ -94,15 +94,13 @@ async def convert_currency(module_response: str, target_currency: str) -> str:
 
     try:
         client = get_shared_client()
-        response = await client.chat.complete_async(
+        converted = await complete_text(
+            client=client,
             model=MODEL_SMALL,
             messages=messages,
             temperature=0.7,
             reasoning_effort="high",
         )
-
-        content = response.choices[0].message.content
-        converted = extract_text_from_content(content)
 
         logger.info(f"Successfully converted response to {target_currency}")
         return converted

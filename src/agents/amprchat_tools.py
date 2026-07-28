@@ -1011,7 +1011,7 @@ def build_help_overview() -> str:
 # Runner Configuration
 # =============================================================================
 
-from src.agents.mistral_helpers import get_mistral_client
+from src.agents.mistral_helpers import get_shared_client
 
 
 async def build_amprchat_config(
@@ -1040,7 +1040,7 @@ async def build_amprchat_config(
     # Build runner config. The response layer already injects currency_context
     # into the per-turn context string, so no extra context_messages are needed here.
     config = RunnerConfig(
-        client=get_mistral_client(),
+        client=get_shared_client(),
         model=AMPCHAT_MODEL,
         tools=tools,
         system_prompt=system_prompt,

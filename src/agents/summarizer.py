@@ -4,7 +4,7 @@ import logging
 from .mistral_helpers import (
     get_shared_client,
     build_messages,
-    extract_text_from_content,
+    complete_text,
     MODEL_MEDIUM,
 )
 
@@ -37,15 +37,13 @@ class SummarizerAgent:
         messages = build_messages(self.system_prompt, message)
 
         try:
-            response = await self.client.chat.complete_async(
+            summary = await complete_text(
+                client=self.client,
                 model=MODEL_MEDIUM,
                 messages=messages,
                 temperature=0.3,
                 reasoning_effort="none",
             )
-
-            content = response.choices[0].message.content
-            summary = extract_text_from_content(content)
 
             logger.info(f"Summarizer generated summary of length {len(summary)}")
             return summary
